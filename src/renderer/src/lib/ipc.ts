@@ -127,6 +127,7 @@ export interface UpdateElementLayoutPayload {
     width?: number
     height?: number
   }>
+  isAbsoluteMode?: boolean
 }
 
 export interface UpdateElementPropertiesPayload {
@@ -178,6 +179,7 @@ export const ipc = {
       session: unknown
       messages: unknown[]
       generatedPages: Array<{
+        id: string
         pageNumber: number
         title: string
         html: string
@@ -187,6 +189,44 @@ export const ipc = {
         status?: string
         error?: string | null
       }>
+    }>,
+  reorderSessionPages: (payload: {
+    sessionId: string
+    orderedPageIds: string[]
+    selectedPageId?: string
+  }) =>
+    getIpc().invoke('session:reorderPages', payload) as Promise<{
+      ok: boolean
+      generatedPages: Array<{
+        id: string
+        pageNumber: number
+        pageId: string
+        title: string
+        html: string
+        htmlPath?: string
+        status?: string
+        error?: string | null
+      }>
+      selectedPageId: string | null
+    }>,
+  deleteSessionPages: (payload: {
+    sessionId: string
+    pageIds: string[]
+    selectedPageId?: string
+  }) =>
+    getIpc().invoke('session:deletePages', payload) as Promise<{
+      ok: boolean
+      generatedPages: Array<{
+        id: string
+        pageNumber: number
+        pageId: string
+        title: string
+        html: string
+        htmlPath?: string
+        status?: string
+        error?: string | null
+      }>
+      selectedPageId: string | null
     }>,
   getSessionMessages: (payload: {
     sessionId: string
@@ -226,11 +266,13 @@ export const ipc = {
     getIpc().invoke('generate:cancel', sessionId) as Promise<{ success: boolean }>,
   listHistoryVersions: (payload: { sessionId: string; limit?: number }) =>
     getIpc().invoke('history:listVersions', payload) as Promise<HistoryVersion[]>,
+  ensureHistoryBaseline: (sessionId: string) =>
+    getIpc().invoke('history:ensureBaseline', { sessionId }) as Promise<{ ok: boolean }>,
   rollbackToHistoryVersion: (payload: { sessionId: string; versionId: string }) =>
     getIpc().invoke('history:rollbackToVersion', payload) as Promise<RollbackHistoryResult>,
   recordHistorySnapshot: (payload: {
     sessionId: string
-    type?: 'generate' | 'edit' | 'addPage' | 'retry' | 'import' | 'rollback'
+    type?: 'generate' | 'edit' | 'addPage' | 'retry' | 'import' | 'rollback' | 'reorder' | 'delete'
     scope?: 'session' | 'deck' | 'page' | 'selector' | 'shell'
     prompt?: string
     metadata?: Record<string, unknown>
@@ -245,6 +287,10 @@ export const ipc = {
     getIpc().invoke('assets:chooseAndUpload', { sessionId, assetType }) as Promise<{
       assets: UploadedAsset[]
       cancelled?: boolean
+    }>,
+  listAssets: (sessionId: string, assetType: 'image' | 'video') =>
+    getIpc().invoke('assets:list', { sessionId, assetType }) as Promise<{
+      assets: Array<{ fileName: string; relativePath: string; absolutePath: string }>
     }>,
   exportPdf: (sessionId: string) =>
     getIpc().invoke('export:pdf', { sessionId }) as Promise<ExportDeckResult>,
@@ -364,6 +410,32 @@ export const ipc = {
     getIpc().invoke('text-editor:update-element-properties', payload) as Promise<{
       success: boolean
     }>,
+  deleteElement: (payload: {
+    sessionId: string
+    htmlPath: string
+    pageId: string
+    selector: string
+  }) =>
+    getIpc().invoke('element-editor:delete-element', payload) as Promise<{
+      success: boolean
+    }>,
+  saveEditBatch: (payload: {
+    sessionId: string
+    htmlPath: string
+    pageId: string
+    dragEdits: unknown[]
+    textEdits: unknown[]
+    deletes?: unknown[]
+    addElements?: unknown[]
+    prompt?: string
+  }) =>
+    getIpc().invoke('edit:save-batch', payload) as Promise<{
+      success: boolean
+      dragCount: number
+      textCount: number
+      deleteCount: number
+      addCount: number
+    }>,
   openFile: (filePath: string, sessionId?: string) =>
     getIpc().invoke('file:open', { path: filePath, sessionId }) as Promise<string>,
   revealFile: (filePath: string, sessionId?: string) =>
@@ -397,5 +469,7 @@ export const ipc = {
   getAppVersion: () =>
     getIpc().invoke('app:getVersion') as Promise<{
       version: string
-    }>
+    }>,
+  openPresentation: (payload: { sessionId: string; startIndex?: number }) =>
+    getIpc().invoke('presentation:open', payload) as Promise<{ success: boolean }>
 }

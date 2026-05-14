@@ -16,4 +16,7 @@ logs
 
 docs/*.md
 
-doc/*.md
+doc/*
+doc/*
+
+patch/*

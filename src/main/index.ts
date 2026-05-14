@@ -3,9 +3,10 @@ import { join } from 'path'
 import { existsSync, mkdirSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import log from 'electron-log/main.js'
+import dayjs from 'dayjs'
 import { PPTDatabase } from './db/database'
 import { AgentManager } from './agent'
-import { setupIPC } from './ipc'
+import { setupIPC, registerLocalAssetProtocol } from './ipc'
 import { setStyleDb } from './utils/style-skills'
 import type { UpdateAvailablePayload } from '@shared/app-update'
 
@@ -15,9 +16,9 @@ let agentManager: AgentManager | null = null
 let isShuttingDown = false
 
 const APP_NAME = 'OhMyPPT'
-const DEFAULT_WINDOW_WIDTH = 1100
-const DEFAULT_WINDOW_HEIGHT = 760
-const BASE_MIN_WIDTH = 860
+const DEFAULT_WINDOW_WIDTH = 1200
+const DEFAULT_WINDOW_HEIGHT = 780
+const BASE_MIN_WIDTH = 880
 const BASE_MIN_HEIGHT = 680
 const TITLEBAR_HEIGHT = 48
 const TITLEBAR_BACKGROUND = '#f4eddf'
@@ -60,15 +61,14 @@ function configureLogging(): void {
     log.transports.file.resolvePathFn = () => join(logDir, 'main.log')
   } else {
     log.transports.file.resolvePathFn = () => {
-      const date = new Date()
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
+      const now = dayjs()
+      const yearMonth = now.format('YYYY-MM')
+      const yearMonthDay = now.format('YYYY-MM-DD')
       return join(
         app.getPath('userData'),
         'ohmyppt_logs',
-        `${year}-${month}`,
-        `${year}-${month}-${day}-v${app.getVersion()}.log`
+        yearMonth,
+        `${yearMonthDay}-v${app.getVersion()}.log`
       )
     }
   }
@@ -261,6 +261,8 @@ app.whenReady().then(async () => {
   agentManager = new AgentManager(db)
 
   const mainWindow = createWindow()
+
+  registerLocalAssetProtocol()
 
   if (mainWindow && db && agentManager) {
     setupIPC(mainWindow, db, agentManager)

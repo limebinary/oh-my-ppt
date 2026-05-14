@@ -9,22 +9,25 @@ export const PageThumbnail = memo(function PageThumbnail({
   page,
   isSelected,
   previewVersion,
-  onSelect
+  onSelect,
+  actions
 }: {
   page: SessionPreviewPage
   isSelected: boolean
   previewVersion: number
-  onSelect?: (pageNumber: number) => void
+  onSelect?: (pageId: string) => void
+  actions?: React.ReactNode
 }): React.JSX.Element {
   const t = useT()
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onSelect ? () => onSelect(page.pageNumber) : undefined}
-          disabled={!onSelect}
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={onSelect ? () => onSelect(page.id) : undefined}
+          aria-disabled={!onSelect}
           className={cn(
             'group relative block w-full min-w-0 overflow-hidden rounded-[1.25rem] p-1.5 text-left transition-all duration-200',
             onSelect ? 'cursor-pointer' : 'cursor-default opacity-60',
@@ -51,7 +54,7 @@ export const PageThumbnail = memo(function PageThumbnail({
             style={{ contain: 'paint' }}
           >
             <PreviewIframe
-              key={`thumb-${page.pageId}-${previewVersion}`}
+              key={`thumb-${page.id}-${previewVersion}`}
               src={page.sourceUrl}
               htmlPath={page.htmlPath}
               pageId={page.pageId}
@@ -79,7 +82,8 @@ export const PageThumbnail = memo(function PageThumbnail({
           >
             {page.title}
           </div>
-        </button>
+          {actions}
+        </div>
       </TooltipTrigger>
       <TooltipContent side="right" align="start">
         <div className="max-w-[240px]">

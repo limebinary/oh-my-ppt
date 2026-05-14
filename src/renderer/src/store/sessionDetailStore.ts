@@ -3,19 +3,17 @@ import type { UploadedAsset } from '@shared/generation.js'
 
 export type SessionDetailChatType = 'main' | 'page'
 export type InteractionMode = 'preview' | 'ai-inspect' | 'edit'
-export type EditSubMode = 'layout' | 'text'
 
 interface SessionDetailUiStore {
   input: string
   chatType: SessionDetailChatType
-  selectedPageNumber: number | null
+  selectedPageId: string | null
   consoleOpen: boolean
   previewKey: number
   isExportingPdf: boolean
   isExportingPng: boolean
   isExportingPptx: boolean
   interactionMode: InteractionMode
-  editSubMode: EditSubMode
   thumbnailVersions: Record<string, number>
   selectedSelector: string | null
   selectorLabel: string
@@ -27,17 +25,20 @@ interface SessionDetailUiStore {
   addPageDialogOpen: boolean
   isAddingPage: boolean
   isRetryingSinglePage: boolean
+  isManagingPages: boolean
+  sidebarCollapsed: boolean
+  assetPickerOpen: boolean
+  assetPickerType: 'image' | 'video'
 
   setInput: (input: string) => void
   setChatType: (chatType: SessionDetailChatType) => void
-  setSelectedPageNumber: (pageNumber: number | null) => void
+  setSelectedPageId: (pageId: string | null) => void
   setConsoleOpen: (open: boolean | ((open: boolean) => boolean)) => void
   bumpPreviewKey: () => void
   setIsExportingPdf: (isExporting: boolean) => void
   setIsExportingPng: (isExporting: boolean) => void
   setIsExportingPptx: (isExporting: boolean) => void
   setInteractionMode: (mode: InteractionMode) => void
-  setEditSubMode: (sub: EditSubMode) => void
   setSelectedElement: (
     selector: string,
     label: string,
@@ -54,7 +55,10 @@ interface SessionDetailUiStore {
   setAddPageDialogOpen: (open: boolean) => void
   setIsAddingPage: (adding: boolean) => void
   setIsRetryingSinglePage: (retrying: boolean) => void
-  finishAddPage: (selectedPageNumber?: number | null) => void
+  setIsManagingPages: (managing: boolean) => void
+  toggleSidebarCollapsed: () => void
+  setAssetPickerOpen: (open: boolean, type?: 'image' | 'video') => void
+  finishAddPage: (selectedPageId?: string | null) => void
   resetForPageChange: () => void
   resetForSessionChange: () => void
 }
@@ -62,14 +66,13 @@ interface SessionDetailUiStore {
 export const useSessionDetailUiStore = create<SessionDetailUiStore>((set) => ({
   input: '',
   chatType: 'page',
-  selectedPageNumber: null,
+  selectedPageId: null,
   consoleOpen: true,
   previewKey: 0,
   isExportingPdf: false,
   isExportingPng: false,
   isExportingPptx: false,
   interactionMode: 'preview' as InteractionMode,
-  editSubMode: 'layout' as EditSubMode,
   thumbnailVersions: {},
   selectedSelector: null,
   selectorLabel: '',
@@ -81,10 +84,14 @@ export const useSessionDetailUiStore = create<SessionDetailUiStore>((set) => ({
   addPageDialogOpen: false,
   isAddingPage: false,
   isRetryingSinglePage: false,
+  isManagingPages: false,
+  sidebarCollapsed: false,
+  assetPickerOpen: false,
+  assetPickerType: 'image' as const,
 
   setInput: (input) => set({ input }),
   setChatType: (chatType) => set({ chatType }),
-  setSelectedPageNumber: (selectedPageNumber) => set({ selectedPageNumber }),
+  setSelectedPageId: (selectedPageId) => set({ selectedPageId }),
   setConsoleOpen: (open) =>
     set((state) => ({
       consoleOpen: typeof open === 'function' ? open(state.consoleOpen) : open
@@ -94,16 +101,16 @@ export const useSessionDetailUiStore = create<SessionDetailUiStore>((set) => ({
   setIsExportingPng: (isExportingPng) => set({ isExportingPng }),
   setIsExportingPptx: (isExportingPptx) => set({ isExportingPptx }),
   setInteractionMode: (interactionMode) => set({ interactionMode }),
-  setEditSubMode: (editSubMode) => set({ editSubMode }),
+  // Fix: only reset to preview when currently in preview mode.
+  // In edit/ai-inspect mode, selecting an element should NOT change the mode.
   setSelectedElement: (selectedSelector, selectorLabel, elementTag = '', elementText = '') =>
     set((state) => ({
       selectedSelector,
       selectorLabel,
       elementTag,
       elementText,
-      interactionMode: state.interactionMode === 'ai-inspect'
-        ? 'ai-inspect'
-        : ('preview' as InteractionMode)
+      interactionMode:
+        state.interactionMode === 'preview' ? ('preview' as InteractionMode) : state.interactionMode
     })),
   clearSelectedElement: () =>
     set({
@@ -133,16 +140,21 @@ export const useSessionDetailUiStore = create<SessionDetailUiStore>((set) => ({
   setAddPageDialogOpen: (addPageDialogOpen) => set({ addPageDialogOpen }),
   setIsAddingPage: (isAddingPage) => set({ isAddingPage }),
   setIsRetryingSinglePage: (isRetryingSinglePage) => set({ isRetryingSinglePage }),
-  finishAddPage: (selectedPageNumber) =>
+  setIsManagingPages: (isManagingPages) => set({ isManagingPages }),
+  toggleSidebarCollapsed: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+  setAssetPickerOpen: (open, type) =>
+    set((state) => ({
+      assetPickerOpen: open,
+      ...(type ? { assetPickerType: type } : { assetPickerType: state.assetPickerType })
+    })),
+  finishAddPage: (selectedPageId) =>
     set((state) => ({
       isAddingPage: false,
-      selectedPageNumber:
-        typeof selectedPageNumber === 'undefined' ? state.selectedPageNumber : selectedPageNumber
+      selectedPageId: typeof selectedPageId === 'undefined' ? state.selectedPageId : selectedPageId
     })),
   resetForPageChange: () =>
     set({
       interactionMode: 'preview' as InteractionMode,
-      editSubMode: 'layout' as EditSubMode,
       selectedSelector: null,
       selectorLabel: '',
       elementTag: '',
@@ -152,9 +164,8 @@ export const useSessionDetailUiStore = create<SessionDetailUiStore>((set) => ({
     set({
       input: '',
       chatType: 'page',
-      selectedPageNumber: null,
+      selectedPageId: null,
       interactionMode: 'preview' as InteractionMode,
-      editSubMode: 'layout' as EditSubMode,
       selectedSelector: null,
       selectorLabel: '',
       elementTag: '',
@@ -165,6 +176,9 @@ export const useSessionDetailUiStore = create<SessionDetailUiStore>((set) => ({
       thumbnailVersions: {},
       addPageDialogOpen: false,
       isAddingPage: false,
-      isRetryingSinglePage: false
+      isRetryingSinglePage: false,
+      isManagingPages: false,
+      sidebarCollapsed: false,
+      assetPickerOpen: false
     })
 }))

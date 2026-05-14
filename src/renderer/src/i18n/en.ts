@@ -36,7 +36,8 @@ export const en = {
       'Supports txt, md, csv, docx (≤{maxSize}MB), and png/jpg/webp images (≤{imageMaxSize}MB). Parsing fills in the topic, page count, and detailed brief; documents remain available as generation references, while images are turned into an editable creation brief and a custom style.',
     importPptx: 'Import PPTX for AI editing',
     importingPptx: 'Importing and parsing...',
-    importPptxTooltip: 'Import a .pptx file up to {maxSize}MB, convert it into editable pages, and automatically parse it into a new template style.',
+    importPptxTooltip:
+      'Import a .pptx file up to {maxSize}MB, convert it into editable pages, and automatically parse it into a new template style.',
     parsed: 'Parsed',
     localOnly: 'Documents/images are parsed into AI-readable context for the current task.',
     topic: 'Topic',
@@ -72,7 +73,8 @@ export const en = {
     documentSingleOnly: 'Upload one document or image at a time.',
     documentCountExceeded: 'Too many documents',
     documentTooLargeTitle: 'File too large',
-    documentTooLarge: 'A single document or image must be under {maxSize}MB. Please compress or split it.',
+    documentTooLarge:
+      'A single document or image must be under {maxSize}MB. Please compress or split it.',
     imageTooLarge: 'A single image must be under {maxSize}MB. Please compress it and try again.',
     documentPathFailedTitle: 'Cannot read file path',
     documentPathFailed: 'Cannot read the file path. Please choose a local document or image again.',
@@ -254,43 +256,38 @@ export const en = {
     writingTips: 'Style Skill writing tips',
     skillMarkdown: 'Skill Markdown',
     tipStructure:
-      'Organize by Visual / Layout / Typography / Animation / Charts / Avoid so the model can follow it reliably.',
+      "Describe the overall mood in flowing prose first, then details. Don't write a cold spec doc.",
     tipAnimation:
-      'Anime.js v4 animation is supported. Specify rhythm, duration, easing, and intent.',
+      'Weave colors into emotional descriptions (e.g. "warm light blue"), list specific imagery (paper boats, umbrellas, clouds).',
     tipNatural:
-      'Describe the desired effect and rhythm directly. Implementation details are not required.',
+      'Describe fonts by their character (handwritten, rounded, warm) — not just family names or specs.',
     tipReadable:
-      'Prioritize readability: keep animation light, hierarchy clear, and avoid flicker or excessive motion.',
+      'State the target audience and use case (e.g. "youth mental health PPT") so the model understands context.',
     emptyMarkdown: '_No Markdown content_',
     saveStyle: 'Save style',
     currentMode: 'Current mode: {mode}',
     builtinMode: 'Built-in (saving creates an override)',
-    template: `## Visual
-- White or light base with generous whitespace
-- Keep illustration and graphic language consistent
+    template: `A clean, bright, light-toned style with a pure white or very light gray background and generous whitespace for an open, uncluttered reading experience.
 
-## Layout
-- Strong titles, clear sections, and explicit hierarchy
-- Put each slide's main conclusion first, with supporting details secondary
+## Colors
+Neutral grays as the primary palette, with a single brand accent color (e.g. blue #2563EB or green #16A34A) for titles and key elements. Background: pure white #FFFFFF. Text: dark gray #1F2937. Restrained yet professional.
 
 ## Typography
-- Stable size scale across title, body, and notes
-- Comfortable line length; avoid dense paragraphs
+Titles use a clean sans-serif font in bold, dark gray or black. Body text uses regular-weight sans-serif at a comfortable size with line height above 1.6 for readability. Clear hierarchy through font size, weight, and color.
 
-## Animation (Anime.js v4)
-- Anime.js v4 animation is supported; keep motion natural
-- Describe elements, sequence, duration, easing, and staggering clearly
-- Suggested entrance animations: 300-700ms with smooth transitions
-- Use motion to clarify hierarchy and guide attention, not to distract
+## Layout
+Clear modular structure, content centered or left-aligned. Hierarchy established through font size, color, and spacing. Generous whitespace, moderate information density per slide.
 
-## Charts
-- Specify chart type when needed: bar, line, pie, etc.
-- Keep colors aligned with the slide theme; avoid high-saturation clashes
+## Animation
+Calm and subtle rhythm. Elements fade in or gently slide up over 0.4s–0.6s with ease-out easing. Avoid flashy transitions.
+
+## Suitable for
+Business presentations, product introductions, project summaries — formal but not stiff.
 
 ## Avoid
-- Do not use remote CDN resources
-- Do not stack too many simultaneous moving elements
-- Do not create flicker or disorienting motion`
+- Do not use high-saturation colors
+- Do not stack heavy gradients and shadows
+- Do not create flickering or large-scale shaking animations`
   },
   generating: {
     stages: {
@@ -341,7 +338,10 @@ export const en = {
     exportPptx: 'Export PPTX',
     exportPng: 'Export PNG',
     exportPdf: 'Export PDF',
-    preview: 'Preview',
+    preview: 'Browser Preview',
+    previewTooltip: 'Open in browser — works independently outside the app',
+    present: 'Present',
+    presentTooltip: 'Fullscreen presentation, arrow keys to navigate, Esc to exit',
     revealFile: 'Show file',
     collapseMessages: 'Collapse message panel',
     expandMessages: 'Expand message panel',
@@ -378,7 +378,7 @@ export const en = {
     exitTextEdit: 'Exit edit',
     previewMode: 'Preview',
     editMode: 'Edit',
-    exitEditMode: 'Exit edit',
+    exitEditMode: 'Exit Edit Mode',
     elementInspector: 'Inspector',
     noElementSelected: 'No element selected',
     closeInspector: 'Close inspector',
@@ -392,15 +392,23 @@ export const en = {
     exitWithoutSaving: 'Exit editing',
     exitAdjust: 'Exit adjustment',
     adjustLayout: 'Adjust position/size',
+    zIndex: 'Layer order',
     saveAdjustments: 'Save adjustments',
+    copyElement: 'Copy',
+    deleteElement: 'Delete element',
+    deleteElementConfirm: 'Are you sure you want to delete this element? This cannot be undone.',
+    nonTextElementHint: 'Still working on this feature.\nYou can use AI mode to inspect and edit elements for now.',
+    deleteElementFailed: 'Failed to delete element',
     exitInspect: 'Exit inspect',
     inspectElement: 'Inspect element',
     aiMode: 'AI',
     exitAiMode: 'Exit AI',
-    exitAndSave: 'Exit & Save',
+    exitAndSave: 'Exit & Save Version',
+    undo: 'Undo',
+    redo: 'Redo',
     clickTextToEdit: 'Double-click text to edit',
     dblClickTextToEdit: 'Double-click text to edit',
-    editModeToast: 'Drag to adjust position and size, double-click text to edit',
+    editModeToast: 'Drag to adjust position and size, click to select and edit elements',
     failedPageHint:
       'This page failed last time and is showing a recoverable file. Keep the Current page context and describe how to fix or regenerate it.',
     clickToSelect: 'Click an element to select it',
@@ -466,14 +474,40 @@ export const en = {
     textSaveEmpty: 'Text cannot be empty',
     inspectActiveToast: 'AI mode active — select elements on the page for AI to modify',
     addPage: 'Add Page',
+    collapseSidebar: 'Collapse sidebar',
+    expandSidebar: 'Expand sidebar',
     addPageHint: 'Auto-generated in the current style — just describe the page you want',
     addPageDescription: 'Describe the page you want to add',
     addPageGenerating: 'Generating new page...',
     addPageGenerate: 'Generate',
     addPageCancel: 'Cancel',
     addPageFailed: 'Failed to add page',
+    deleteConfirmTitle: 'Delete this page?',
     retryFailedPage: 'Regenerate this page',
     retryPageGenerating: 'Regenerating page...',
     retryPageFailed: 'Failed to regenerate page'
+  },
+  pageManagement: {
+    dragHandle: 'Drag to reorder',
+    deletePage: 'Delete page',
+    deleteConfirmTitle: 'Delete this page?',
+    deleteConfirmDescription: 'The page will be removed from this presentation.',
+    deleteConfirmAction: 'Delete',
+    deleteLastPageError: 'Cannot delete the last page',
+    reorderFailed: 'Failed to reorder pages',
+    deleteFailed: 'Failed to delete page'
+  },
+  editMode: {
+    addImage: 'Add Image',
+    addVideo: 'Add Video',
+    fromLibrary: 'Choose from Library',
+    fromLocal: 'Upload from Local',
+    chooseImage: 'Choose Image',
+    chooseVideo: 'Choose Video',
+    assetPickerHint: 'Select an asset then confirm',
+    loadingAssets: 'Loading...',
+    noAssets: 'No assets yet. Upload from local first.',
+    cancel: 'Cancel',
+    confirmAdd: 'Confirm Add'
   }
 } satisfies DeepStringShape<typeof zh>
