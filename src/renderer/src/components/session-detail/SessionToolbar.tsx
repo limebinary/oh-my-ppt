@@ -3,11 +3,11 @@ import {
   ExternalLink,
   FileDown,
   FileSearch,
-  FileText,
   History,
   Image as ImageIcon,
   Loader2,
   Monitor,
+  Package,
   Presentation
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
@@ -35,6 +35,7 @@ export function SessionToolbar({
   onExportPdf,
   onExportPng,
   onExportPptx,
+  onExportSlidePack,
   onOpenHistory,
   onOpenPreview,
   onRevealFile,
@@ -46,7 +47,10 @@ export function SessionToolbar({
   canRevealFile: boolean
   onExportPdf: () => void
   onExportPng: () => void
-  onExportPptx: (options?: { exportImages?: boolean; exportShapes?: boolean }) => void
+  onExportPptx: (
+    options?: { imageOnly?: boolean; embedFonts?: boolean | 'auto' | 'always' | 'never' }
+  ) => void
+  onExportSlidePack: () => void
   onOpenHistory: () => void
   onOpenPreview: () => void
   onRevealFile: () => void
@@ -56,6 +60,8 @@ export function SessionToolbar({
   const isExportingPdf = useSessionDetailUiStore((state) => state.isExportingPdf)
   const isExportingPng = useSessionDetailUiStore((state) => state.isExportingPng)
   const isExportingPptx = useSessionDetailUiStore((state) => state.isExportingPptx)
+  const isExportingSlidePack = useSessionDetailUiStore((state) => state.isExportingSlidePack)
+  const isExporting = isExportingPdf || isExportingPng || isExportingPptx || isExportingSlidePack
 
   return (
     <>
@@ -68,7 +74,7 @@ export function SessionToolbar({
               size="sm"
               className={toolbarButtonClass}
               onClick={onOpenHistory}
-              disabled={historyDisabled || isExportingPdf || isExportingPng || isExportingPptx}
+              disabled={historyDisabled || isExporting}
             >
               <History className={toolbarIconClass} />
               {t('sessionDetail.history')}
@@ -87,7 +93,7 @@ export function SessionToolbar({
               variant="outline"
               size="sm"
               className={cn(toolbarButtonClass, 'gap-1')}
-              disabled={isExportingPptx}
+              disabled={isExportingPptx || isExportingSlidePack}
             >
               {isExportingPptx ? (
                 <Loader2 className={cn(toolbarIconClass, 'animate-spin')} />
@@ -99,20 +105,38 @@ export function SessionToolbar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="min-w-[14rem]">
-            <DropdownMenuItem onClick={() => onExportPptx({ exportImages: true, exportShapes: true })}>
+            <DropdownMenuItem onClick={() => onExportPptx()}>
               <Presentation className={dropdownItemIconClass} />
-              {t('sessionDetail.exportPptxDefault')}
+              {t('sessionDetail.exportPptxEditable')}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onExportPptx({ exportImages: false, exportShapes: false })}>
-              <FileText className={dropdownItemIconClass} />
-              {t('sessionDetail.exportPptxTextOnly')}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onExportPptx({ exportImages: true, exportShapes: false })}>
+            <DropdownMenuItem onClick={() => onExportPptx({ imageOnly: true })}>
               <ImageIcon className={dropdownItemIconClass} />
-              {t('sessionDetail.exportPptxWithImages')}
+              {t('sessionDetail.exportPptxImageOnly')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+      )}
+      {hasPages && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={toolbarButtonClass}
+              onClick={onExportSlidePack}
+              disabled={isExportingSlidePack}
+            >
+              {isExportingSlidePack ? (
+                <Loader2 className={cn(toolbarIconClass, 'animate-spin')} />
+              ) : (
+                <Package className={toolbarIconClass} />
+              )}
+              {t('sessionDetail.exportSlidePack')}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t('sessionDetail.exportSlidePackTooltip')}</TooltipContent>
+        </Tooltip>
       )}
       {hasPages && (
         <Button

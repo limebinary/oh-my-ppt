@@ -266,14 +266,6 @@ export function SessionDetailPage(): React.JSX.Element {
     }
   }, [id, loadSession, resetForSessionChange, setMessages])
 
-  // Ensure git history baseline exists for old sessions (runs once per session)
-  const baselineDoneRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (!id || !currentSession || baselineDoneRef.current === id) return
-    baselineDoneRef.current = id
-    void ipc.ensureHistoryBaseline(id)
-  }, [id, currentSession])
-
   useEffect(() => {
     useGenerateStore.getState().setPages(currentGeneratedPages)
   }, [currentGeneratedPages])
@@ -777,7 +769,7 @@ export function SessionDetailPage(): React.JSX.Element {
     detailState.setIsExportingPdf(true)
     toastInfo(t('sessionDetail.exportPdfStart'), {
       description: t('sessionDetail.exportPdfDescription'),
-      duration: 8000
+      duration: 4000
     })
     try {
       const result = await ipc.exportPdf(id)
@@ -809,7 +801,7 @@ export function SessionDetailPage(): React.JSX.Element {
     detailState.setIsExportingPng(true)
     toastInfo(t('sessionDetail.exportPngStart'), {
       description: t('sessionDetail.exportPngDescription'),
-      duration: 8000
+      duration: 4000
     })
     try {
       const result = await ipc.exportPng(id)
@@ -835,17 +827,24 @@ export function SessionDetailPage(): React.JSX.Element {
     }
   }
 
-  const handleExportPptx = async (options?: {
-    exportImages?: boolean
-    exportShapes?: boolean
-  }): Promise<void> => {
+  const handleExportPptx = async (
+    options?: { imageOnly?: boolean; embedFonts?: boolean | 'auto' | 'always' | 'never' }
+  ): Promise<void> => {
     const detailState = useSessionDetailUiStore.getState()
     if (!id || detailState.isExportingPptx) return
+    const imageOnly = options?.imageOnly === true
     detailState.setIsExportingPptx(true)
-    toastInfo(t('sessionDetail.pptxPreparing'), {
-      description: t('sessionDetail.pptxPreparingDescription'),
-      duration: 8000
-    })
+    toastInfo(
+      t(imageOnly ? 'sessionDetail.pptxPreparingImage' : 'sessionDetail.pptxPreparingEditable'),
+      {
+        description: t(
+          imageOnly
+            ? 'sessionDetail.pptxPreparingImageDescription'
+            : 'sessionDetail.pptxPreparingEditableDescription'
+        ),
+        duration: 4000
+      }
+    )
     try {
       const result = await ipc.exportPptx(id, options)
       if (result.cancelled) {
@@ -864,12 +863,42 @@ export function SessionDetailPage(): React.JSX.Element {
         return
       }
       toastSuccess(t('sessionDetail.pptxExported', { count: result.pageCount || 0 }), {
-        description: t('sessionDetail.pptxEditableDescription')
+        description: t(
+          imageOnly ? 'sessionDetail.pptxImageDescription' : 'sessionDetail.pptxEditableDescription'
+        )
       })
     } catch (error) {
       toastError(error instanceof Error ? error.message : t('sessionDetail.exportFailed'))
     } finally {
       useSessionDetailUiStore.getState().setIsExportingPptx(false)
+    }
+  }
+
+  const handleExportSlidePack = async (): Promise<void> => {
+    const detailState = useSessionDetailUiStore.getState()
+    if (!id || detailState.isExportingSlidePack) return
+    detailState.setIsExportingSlidePack(true)
+    toastInfo(t('sessionDetail.slidePackPreparing'), {
+      description: t('sessionDetail.slidePackPreparingDescription'),
+      duration: 4000
+    })
+    try {
+      const result = await ipc.exportSlidePack(id)
+      if (result.cancelled) {
+        toastInfo(t('sessionDetail.exportCancelled'))
+        return
+      }
+      if (!result.success || !result.path) {
+        toastError(t('sessionDetail.exportFailed'))
+        return
+      }
+      toastSuccess(t('sessionDetail.slidePackExported'), {
+        description: t('sessionDetail.slidePackExportedDescription')
+      })
+    } catch (error) {
+      toastError(error instanceof Error ? error.message : t('sessionDetail.exportFailed'))
+    } finally {
+      useSessionDetailUiStore.getState().setIsExportingSlidePack(false)
     }
   }
 
@@ -1298,6 +1327,7 @@ export function SessionDetailPage(): React.JSX.Element {
                 onExportPdf={() => void handleExportPdf()}
                 onExportPng={() => void handleExportPng()}
                 onExportPptx={(options) => void handleExportPptx(options)}
+                onExportSlidePack={() => void handleExportSlidePack()}
                 onOpenHistory={() => void handleOpenHistory()}
                 onOpenPreview={() => void openProjectPreview()}
                 onRevealFile={() => {
