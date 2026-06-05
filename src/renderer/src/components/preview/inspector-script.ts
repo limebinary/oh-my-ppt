@@ -1,3 +1,5 @@
+import { buildElementPickerCoreScript } from './element-picker-core'
+
 export const INSPECTOR_CONSOLE_PREFIX = '__PPT_INSPECTOR__:'
 
 export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-edit' }): string {
@@ -11,6 +13,7 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
   const LOG_PREFIX = "${INSPECTOR_CONSOLE_PREFIX}";
   const MODE = "${mode}";
   const TEXT_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "span", "strong", "em", "b", "i", "small", "label", "button", "td", "th", "blockquote", "figcaption"]);
+  const EDITABLE_TEXT_CHILD_TAGS = new Set([...TEXT_TAGS, "a", "code", "sub", "sup", "u", "s", "br"]);
   const BLOCKED_TEXT_TAGS = new Set(["script", "style", "svg", "canvas", "img", "video", "audio", "input", "textarea", "select", "option"]);
   const SCAFFOLD_BLOCK_IDS = new Set(["content", "page", "root"]);
   const uiMessage = (zh, en) => {
@@ -112,7 +115,7 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
     const blockId = el.getAttribute("data-block-id");
     if (blockId) {
       const selector = scope + ' [data-block-id="' + attrEscape(blockId) + '"]';
-      return selector;
+      if (isUniqueSelector(selector)) return selector;
     }
 
     const role = el.getAttribute("data-role");
@@ -234,7 +237,8 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
   const hasOnlyEditableTextChildren = (element) => {
     return Array.from(element.children || []).every((child) => {
       const tag = child.tagName ? child.tagName.toLowerCase() : "";
-      return tag === "br";
+      if (!EDITABLE_TEXT_CHILD_TAGS.has(tag)) return false;
+      return hasOnlyEditableTextChildren(child);
     });
   };
 
@@ -266,6 +270,29 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
     return rect.width >= 2 && rect.height >= 2;
   };
 
+  const isGeneratedBackgroundTarget = (element) => {
+    if (!(element instanceof Element)) return false;
+    return Boolean(element.closest('[data-ppt-generated-background="1"]'));
+  };
+
+  const pickWithoutGeneratedBackground = (origin, clientX, clientY, pickAtPointBase) => {
+    const backgrounds = Array.from(document.querySelectorAll('[data-ppt-generated-background="1"]'))
+      .filter((element) => element instanceof HTMLElement);
+    if (backgrounds.length === 0) return null;
+    const previousVisibility = backgrounds.map((element) => element.style.visibility);
+    try {
+      backgrounds.forEach((element) => {
+        element.style.visibility = "hidden";
+      });
+      const alternate = pickAtPointBase(origin, clientX, clientY);
+      return alternate && !isGeneratedBackgroundTarget(alternate) ? alternate : null;
+    } finally {
+      backgrounds.forEach((element, index) => {
+        element.style.visibility = previousVisibility[index] || "";
+      });
+    }
+  };
+
   const promoteToWrapper = (element) => {
     if (element.getAttribute("data-block-id")) return element;
     const contentRoot = getContentRoot(element);
@@ -283,53 +310,21 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
     return element;
   };
 
-  const isPointInRect = (rect, clientX, clientY) => {
-    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-  };
+  ${buildElementPickerCoreScript()}
 
-  const getElementDepth = (element) => {
-    let depth = 0;
-    let current = element;
-    while (current && current.parentElement) {
-      depth += 1;
-      current = current.parentElement;
+  const elementPicker = createPptElementPicker({
+    getPageRoot,
+    getContentRoot,
+    isSelectable: isUsableTarget,
+    getSelector: buildStableSelector,
+    resolveTarget: ({ origin, clientX, clientY, target, pickAtPointBase }) => {
+      if (!isGeneratedBackgroundTarget(target)) return target;
+      return pickWithoutGeneratedBackground(origin, clientX, clientY, pickAtPointBase) || target;
     }
-    return depth;
-  };
+  });
 
   const getPointTarget = (origin, clientX, clientY) => {
-    const hitElement = document.elementFromPoint(clientX, clientY);
-    const root = getPageRoot(origin) || getPageRoot(hitElement) || document.querySelector(".ppt-page-root, [data-ppt-guard-root='1']");
-    if (!root) return null;
-    const seen = new Set();
-    const candidates = [];
-    const addCandidate = (element) => {
-      if (!(element instanceof Element)) return;
-      if (seen.has(element)) return;
-      seen.add(element);
-      if (!root.contains(element)) return;
-      if (!isUsableTarget(element)) return;
-      const selector = buildStableSelector(element);
-      if (!selector) return;
-      const rect = element.getBoundingClientRect();
-      if (!isPointInRect(rect, clientX, clientY)) return;
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      candidates.push({
-        element,
-        area: Math.max(1, rect.width * rect.height),
-        distance: Math.hypot(centerX - clientX, centerY - clientY),
-        depth: getElementDepth(element),
-      });
-    };
-
-    if (typeof document.elementsFromPoint === "function") {
-      document.elementsFromPoint(clientX, clientY).forEach(addCandidate);
-    }
-    root.querySelectorAll("*").forEach(addCandidate);
-
-    candidates.sort((a, b) => a.area - b.area || b.depth - a.depth || a.distance - b.distance);
-    return candidates[0]?.element || null;
+    return elementPicker.pickAtPoint(origin, clientX, clientY);
   };
 
   const pickCanvasTarget = (origin) => {
@@ -393,6 +388,10 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
     style.id = STYLE_ID;
     const highlightColor = MODE === "text-edit" ? "#16a34a" : "#3b82f6";
     style.textContent = \`
+      html, body, body * {
+        animation: none !important;
+        transition: none !important;
+      }
       .\${HIGHLIGHT_CLASS} {
         cursor: \${MODE === "text-edit" ? "text" : "crosshair"} !important;
       }
@@ -410,12 +409,91 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
 
   let activeElement = null;
   let highlightOverlayElement = null;
+  const restoredAnimationStyles = [];
   const cursorHost = document.body || document.documentElement;
   const previousCursor = cursorHost && cursorHost.style ? cursorHost.style.cursor : "";
   if (cursorHost && cursorHost.style) {
     cursorHost.style.cursor = MODE === "text-edit" ? "text" : "crosshair";
   }
   ensureStyle();
+
+  const freezeAnimationsForInspect = () => {
+    if (window.PPT && typeof window.PPT.finishAnimations === "function") {
+      try { window.PPT.finishAnimations(); } catch (_error) {}
+    } else if (window.PPT && typeof window.PPT.stopAnimations === "function") {
+      try { window.PPT.stopAnimations(); } catch (_error) {}
+    }
+    try {
+      document.getAnimations?.().forEach((animation) => {
+        try {
+          if (typeof animation.finish === "function") animation.finish();
+          else if (typeof animation.cancel === "function") animation.cancel();
+        } catch (_error) {
+          try { animation.cancel(); } catch (_cancelError) {}
+        }
+      });
+    } catch (_error) {}
+    const forceVisibleIfMotionStopped = (el) => {
+      if (!(el instanceof HTMLElement)) return;
+      const s = el.style;
+      const computed = getComputedStyle(el);
+      const inlineOpacity = s.opacity.trim();
+      const inlineOpacityNumber = inlineOpacity ? Number(inlineOpacity) : NaN;
+      const hasMotionMarker =
+        el.matches("[data-anim], [data-anime], [data-animate], [data-ppt-anim-initialized='1'], .opacity-0");
+      const hasInitialHiddenOpacity =
+        inlineOpacity &&
+        Number.isFinite(inlineOpacityNumber) &&
+        inlineOpacityNumber <= 0.04;
+      const motionMarked =
+        hasMotionMarker ||
+        hasInitialHiddenOpacity;
+      if (motionMarked && Number(computed.opacity || "1") < 0.98) {
+        s.opacity = "1";
+      }
+      if (
+        motionMarked &&
+        inlineOpacity &&
+        /(translate|scale)\\(/i.test(s.transform || "")
+      ) {
+        s.transform = "";
+      }
+    }
+    const root = document.querySelector(".ppt-page-root, [data-ppt-guard-root='1']");
+    if (!root) return;
+    root.querySelectorAll("[style]").forEach((el) => {
+      if (!(el instanceof HTMLElement)) return;
+      const s = el.style;
+      if (s.transition && (s.transition.includes("transform") || s.transition.includes("opacity"))) {
+        s.transition = "";
+      }
+      forceVisibleIfMotionStopped(el);
+    });
+    root.querySelectorAll("[data-ppt-anim-initialized='1']").forEach((el) => {
+      if (!(el instanceof HTMLElement)) return;
+      restoredAnimationStyles.push({
+        el,
+        opacity: el.style.opacity,
+        transform: el.style.transform,
+      });
+      el.style.opacity = "";
+      el.style.transform = "";
+    });
+    root
+      .querySelectorAll("[data-anim], [data-anime], [data-animate], .opacity-0")
+      .forEach(forceVisibleIfMotionStopped);
+  };
+
+  const restoreFrozenAnimationStyles = () => {
+    restoredAnimationStyles.forEach((entry) => {
+      if (!entry.el || !entry.el.isConnected) return;
+      entry.el.style.opacity = entry.opacity;
+      entry.el.style.transform = entry.transform;
+    });
+    restoredAnimationStyles.length = 0;
+  };
+
+  freezeAnimationsForInspect();
 
   const getVisualBounds = (element) => {
     const base = element.getBoundingClientRect();
@@ -492,8 +570,7 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
     updateHighlightOverlay();
   };
 
-  const onMouseMove = (event) => {
-    const target = pickTarget(event.target, event.clientX, event.clientY);
+  const onHover = (target) => {
     if (!target) {
       clearActive();
       return;
@@ -501,18 +578,14 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
     setActive(target);
   };
 
-  const onClick = (event) => {
-    const target = pickTarget(event.target, event.clientX, event.clientY);
-    if (!target) return;
+  const onPick = (target) => {
     const selector = buildStableSelector(target);
     if (!selector) {
       console.log(LOG_PREFIX + JSON.stringify({
         type: "invalid",
         message: uiMessage("无法为该元素生成稳定选择器，请点击 content 内的可见元素", "Could not build a stable selector for this element. Click a visible element inside content."),
       }));
-      event.preventDefault();
-      event.stopPropagation();
-      return;
+      return true;
     }
 
     const elementTag = target.tagName ? target.tagName.toLowerCase() : "";
@@ -545,22 +618,19 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
       }
     }));
 
-    event.preventDefault();
-    event.stopPropagation();
+    return true;
   };
 
   const onKeyDown = (event) => {
     if (event.key === "Escape") {
       console.log(LOG_PREFIX + JSON.stringify({ type: "exit" }));
-      event.preventDefault();
-      event.stopPropagation();
+      return true;
     }
+    return false;
   };
 
   const cleanup = () => {
-    document.removeEventListener("mousemove", onMouseMove, true);
-    document.removeEventListener("click", onClick, true);
-    document.removeEventListener("keydown", onKeyDown, true);
+    elementPicker.stop();
     window.removeEventListener("scroll", updateHighlightOverlay, true);
     window.removeEventListener("resize", updateHighlightOverlay, true);
     clearActive();
@@ -570,15 +640,18 @@ export function buildInspectorInjectScript(options?: { mode?: 'inspect' | 'text-
     }
     const style = document.getElementById(STYLE_ID);
     if (style) style.remove();
+    restoreFrozenAnimationStyles();
     if (cursorHost && cursorHost.style) {
       cursorHost.style.cursor = previousCursor || "";
     }
     delete window[STATE_KEY];
   };
 
-  document.addEventListener("mousemove", onMouseMove, true);
-  document.addEventListener("click", onClick, true);
-  document.addEventListener("keydown", onKeyDown, true);
+  elementPicker.start({
+    onHover,
+    onClick: onPick,
+    onKeyDown
+  });
   window.addEventListener("scroll", updateHighlightOverlay, true);
   window.addEventListener("resize", updateHighlightOverlay, true);
 

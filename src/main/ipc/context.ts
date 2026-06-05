@@ -335,6 +335,18 @@ export function createIpcContext(
           progress: chunk.payload.progress ?? null,
           htmlPath: chunk.payload.htmlPath ?? null
         }
+      case 'page_planned':
+      case 'page_started':
+      case 'page_failed':
+        return {
+          type: chunk.type,
+          stage: chunk.payload.stage,
+          pageNumber: chunk.payload.pageNumber,
+          pageId: chunk.payload.pageId,
+          title: chunk.payload.title,
+          progress: chunk.payload.progress ?? null,
+          error: chunk.payload.error ?? null
+        }
       case 'run_completed':
         return {
           type: chunk.type,
@@ -444,8 +456,11 @@ export function createIpcContext(
       enrichedChunk.type === 'stage_started' ||
       enrichedChunk.type === 'stage_progress' ||
       enrichedChunk.type === 'llm_status' ||
+      enrichedChunk.type === 'page_planned' ||
+      enrichedChunk.type === 'page_started' ||
       enrichedChunk.type === 'page_generated' ||
       enrichedChunk.type === 'page_updated' ||
+      enrichedChunk.type === 'page_failed' ||
       enrichedChunk.type === 'run_completed' ||
       enrichedChunk.type === 'run_error'
     ) {
@@ -498,8 +513,10 @@ export function createIpcContext(
         chunk.type !== 'stage_started' &&
         chunk.type !== 'stage_progress' &&
         chunk.type !== 'llm_status' &&
+        chunk.type !== 'page_started' &&
         chunk.type !== 'page_generated' &&
-        chunk.type !== 'page_updated'
+        chunk.type !== 'page_updated' &&
+        chunk.type !== 'page_failed'
       ) {
         emitGenerateChunk(sessionId, chunk)
         return
@@ -633,8 +650,8 @@ export function createIpcContext(
       '- 如需使用图片或视频，请引用上面的相对路径。',
       '- 禁止使用 file://、绝对路径或 base64。',
       '- 不要重新引入远程资源，优先使用这些本地素材。',
-      '- 插入视频时必须使用 HTML <video> 标签，并包含 autoplay muted loop playsinline preload="auto"。',
-      '- 插入视频时不要添加 controls 属性，确保页面内不显示控制条。'
+      '- 插入视频时必须使用 HTML <video> 标签，并包含 controls playsinline preload="metadata"。',
+      '- 视频默认不要添加 autoplay 或 muted，让用户点击控件后播放并保留声音；只有明确要求循环背景视频时才使用 muted/loop。'
     ]
       .filter(Boolean)
       .join('\n')

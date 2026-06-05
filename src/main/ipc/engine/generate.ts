@@ -29,6 +29,7 @@ import {
   createReferenceDocumentRetriever,
   formatReferenceDocumentSnippets
 } from '../../utils/reference-document-retrieval'
+import { logAgentToolEvents } from '../../utils/agent-tool-logger'
 
 type AppLocale = 'zh' | 'en'
 
@@ -94,6 +95,7 @@ async function processAgentStream(
 ): Promise<void> {
   const { sessionId, workerLabel, onCustom, onModelThinking, onMessage } = options
   let firstChunkLogged = false
+  const seenToolEvents = new Set<string>()
 
   for await (const chunk of stream) {
     if (!firstChunkLogged) {
@@ -104,6 +106,12 @@ async function processAgentStream(
     const parts = chunk as unknown[]
     const mode = parts[1] as string
     const data = parts[2]
+
+    if (mode === 'updates') {
+      logAgentToolEvents(data, seenToolEvents, { tag: 'deepagent', source: 'updates' })
+    } else if (mode === 'messages') {
+      logAgentToolEvents(data, seenToolEvents, { tag: 'deepagent', source: 'messages' })
+    }
 
     if (mode === 'custom' && data && typeof data === 'object') {
       const custom = data as DeckToolStatusChunk
@@ -848,6 +856,9 @@ export const runDeepAgentDeckGeneration = async (args: {
   outlineTitles: string[]
   outlineItems: OutlineItem[]
   sourceDocumentPaths?: string[]
+  systemPromptAddendum?: string
+  singlePagePromptAddendum?: string
+  requireTemplatePageRead?: boolean
   generationMode?: 'generate' | 'retry'
   pageTasks?: Array<{
     pageNumber: number
@@ -856,7 +867,7 @@ export const runDeepAgentDeckGeneration = async (args: {
     contentOutline?: string | null
     layoutIntent?: OutlineItem['layoutIntent']
   }>
-  designContract: DesignContract
+  designContract?: DesignContract
   projectDir: string
   indexPath: string
   pageFileMap: Record<string, string>
@@ -1009,12 +1020,14 @@ export const runDeepAgentDeckGeneration = async (args: {
     indexPath: args.indexPath,
     totalPages,
     fixedConcurrency: useDualWorkerQueue ? 2 : 1,
-    designContract: {
-      theme: args.designContract.theme,
-      background: args.designContract.background,
-      palette: args.designContract.palette,
-      titleStyle: args.designContract.titleStyle
-    }
+    designContract: args.designContract
+      ? {
+          theme: args.designContract.theme,
+          background: args.designContract.background,
+          palette: args.designContract.palette,
+          titleStyle: args.designContract.titleStyle
+        }
+      : null
   })
 
   const referenceDocumentRetriever = args.sourceDocumentPaths?.length
@@ -1038,6 +1051,10 @@ export const runDeepAgentDeckGeneration = async (args: {
       throw new Error(uiText(args.appLocale, '生成已取消', 'Generation canceled'))
     }
     const pageStartedAt = Date.now()
+    const currentPagePath = args.pageFileMap[page.pageId]
+    const writeToolName = args.requireTemplatePageRead
+      ? 'update_template_page_file'
+      : 'update_single_page_file'
 
     emitPageStatus({
       pageId: page.pageId,
@@ -1045,8 +1062,22 @@ export const runDeepAgentDeckGeneration = async (args: {
       detail: `${page.pageId} · ${page.title}`,
       pageProgress: 5
     })
+    args.emit?.({
+      type: 'page_started',
+      payload: {
+        runId: args.runId || '',
+        stage: 'rendering',
+        label: progressText(args.appLocale, 'generating'),
+        progress: getOverallRenderProgress(),
+        currentPage: page.pageNumber,
+        totalPages,
+        pageNumber: page.pageNumber,
+        pageId: page.pageId,
+        title: page.title,
+        htmlPath: currentPagePath
+      }
+    })
 
-    const currentPagePath = args.pageFileMap[page.pageId]
     if (!currentPagePath) {
       throw new Error(`pageFileMap 缺少 ${page.pageId} 对应文件路径`)
     }
@@ -1092,6 +1123,7 @@ export const runDeepAgentDeckGeneration = async (args: {
       temperature: args.temperature,
       maxTokens: args.maxTokens,
       styleId: args.styleId,
+      systemPromptAddendum: args.systemPromptAddendum,
       context: {
         sessionId: args.sessionId,
         projectDir: args.projectDir,
@@ -1102,6 +1134,7 @@ export const runDeepAgentDeckGeneration = async (args: {
         styleSkillPrompt: args.styleSkillPrompt,
         appLocale: args.appLocale,
         designContract: args.designContract,
+        templatePageReadRequired: args.requireTemplatePageRead,
         userMessage: args.userMessage,
         outlineTitles: [page.title],
         outlineItems: [
@@ -1125,20 +1158,35 @@ export const runDeepAgentDeckGeneration = async (args: {
           messages: [
             {
               role: 'user',
-              content: buildSinglePageGenerationPrompt({
-                topic: args.topic,
-                deckTitle: args.deckTitle,
-                pageId: page.pageId,
-                pageNumber: page.pageNumber,
-                pageTitle: page.title,
-                pageOutline: page.outline,
-                layoutIntent: page.layoutIntent,
-                sourceDocumentPaths: args.sourceDocumentPaths,
-                referenceDocumentSnippets,
-                isRetryMode: args.generationMode === 'retry',
-                designContract: args.designContract,
-                retryContext
-              })
+              content: [
+                args.singlePagePromptAddendum?.trim() || '',
+                args.requireTemplatePageRead
+                  ? [
+                      'Template inspection is mandatory before writing.',
+                      `1. First call read_file(path="/${page.pageId}.html", offset=0, limit=1200) to inspect the copied template page.`,
+                      '2. Identify every template-skeleton asset and wrapper: background images, texture images, decorative images, masks, overlays, CSS background-image/url(...) references, <img src>, SVG image href, font scale, spacing rhythm, color language, and reusable structural wrappers from that file.',
+                      '3. These background/decorative assets are not old business content. Do not delete them when replacing text, metrics, logos, or content images.',
+                      '4. update_template_page_file rebuilds the page from your content fragment and rejects writes that drop template skeleton resources, so the fragment you write must explicitly include the required background/decorative layers or exact local asset references from the template page.',
+                      '5. Only after reading the file, call update_template_page_file with the new content while preserving the template visual system unless the user explicitly asks for a redesign.',
+                      '6. Do not call update_single_page_file in this template run.'
+                    ].join('\n')
+                  : '',
+                buildSinglePageGenerationPrompt({
+                  topic: args.topic,
+                  deckTitle: args.deckTitle,
+                  pageId: page.pageId,
+                  pageNumber: page.pageNumber,
+                  pageTitle: page.title,
+                  pageOutline: page.outline,
+                  layoutIntent: page.layoutIntent,
+                  sourceDocumentPaths: args.sourceDocumentPaths,
+                  referenceDocumentSnippets,
+                  isRetryMode: args.generationMode === 'retry',
+                  writeToolName,
+                  designContract: args.designContract,
+                  retryContext
+                })
+              ].filter(Boolean).join('\n\n')
             }
           ]
         },
@@ -1211,8 +1259,8 @@ export const runDeepAgentDeckGeneration = async (args: {
       ) {
         throw new Error(
           [
-            `页面未写入 (${page.pageId})：模型没有成功调用 update_single_page_file 写入目标 page 文件。`,
-            `必须调用 update_single_page_file(pageId="${page.pageId}", content=完整创意页面片段)，不要只在最终回复里描述 HTML。`
+            `页面未写入 (${page.pageId})：模型没有成功调用 ${writeToolName} 写入目标 page 文件。`,
+            `必须调用 ${writeToolName}(pageId="${page.pageId}", content=完整创意页面片段)，不要只在最终回复里描述 HTML。`
           ].join(' ')
         )
       }
@@ -1382,6 +1430,22 @@ export const runDeepAgentDeckGeneration = async (args: {
           }
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error)
+          args.emit?.({
+            type: 'page_failed',
+            payload: {
+              runId: args.runId || '',
+              stage: 'rendering',
+              label: progressText(args.appLocale, 'failed'),
+              progress: getOverallRenderProgress(),
+              currentPage: page.pageNumber,
+              totalPages,
+              pageNumber: page.pageNumber,
+              pageId: page.pageId,
+              title: page.title,
+              htmlPath: args.pageFileMap[page.pageId] || '',
+              error: reason
+            }
+          })
           await args.onPageFailed?.({
             pageNumber: page.pageNumber,
             pageId: page.pageId,

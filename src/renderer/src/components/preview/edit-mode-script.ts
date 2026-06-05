@@ -1,3 +1,5 @@
+import { buildElementPickerCoreScript } from './element-picker-core'
+
 export const EDIT_MODE_CONSOLE_PREFIX = '__PPT_EDIT_MODE__:'
 
 export type ElementKind =
@@ -52,12 +54,22 @@ export interface EditableElementSnapshot {
     muted?: boolean
     loop?: boolean
     autoplay?: boolean
+    playsInline?: boolean
+    preload?: string
   }
   text?: {
     editable: boolean
     value: string
+    html: string
     reason?: string
   }
+}
+
+export interface EditTextTarget {
+  type: 'text-node'
+  parentSelector: string
+  textNodeIndex: number
+  text: string
 }
 
 export interface EditSelectionPayload {
@@ -71,6 +83,8 @@ export interface EditSelectionPayload {
   snapshot?: EditableElementSnapshot | null
   isText: boolean
   text: string
+  html?: string
+  textTarget?: EditTextTarget
   style: {
     color?: string
     fontSize?: string
@@ -151,6 +165,7 @@ export function buildEditModeInjectScript(previewScale = 1): string {
   const __fitScope = document.querySelector(".ppt-page-fit-scope");
   if (__fitScope) __fitScope.style.transform = "none";
   const TEXT_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "span", "strong", "em", "b", "i", "small", "label", "button", "td", "th", "blockquote", "figcaption"]);
+  const EDITABLE_TEXT_CHILD_TAGS = new Set([...TEXT_TAGS, "a", "code", "sub", "sup", "u", "s", "br"]);
   const BLOCKED_TEXT_TAGS = new Set(["script", "style", "svg", "canvas", "img", "video", "audio", "input", "textarea", "select", "option"]);
 
   const normalizeText = (value) => String(value || "").replace(/\\\\s+/g, " ").trim();
@@ -162,7 +177,8 @@ export function buildEditModeInjectScript(previewScale = 1): string {
   const hasOnlyEditableTextChildren = (element) => {
     return Array.from(element.children || []).every((child) => {
       const tag = child.tagName ? child.tagName.toLowerCase() : "";
-      return tag === "br";
+      if (!EDITABLE_TEXT_CHILD_TAGS.has(tag)) return false;
+      return hasOnlyEditableTextChildren(child);
     });
   };
 
@@ -268,7 +284,10 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     if (!(el instanceof Element)) return null;
     const scope = getPageScopeSelector();
     const blockId = el.getAttribute("data-block-id");
-    if (blockId) return scope + ' [data-block-id="' + attrEscape(blockId) + '"]';
+    if (blockId) {
+      const selector = scope + ' [data-block-id="' + attrEscape(blockId) + '"]';
+      if (isUniqueSelector(selector)) return selector;
+    }
 
     const role = el.getAttribute("data-role");
     if (role) {
@@ -452,53 +471,17 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     return rect.width >= 2 && rect.height >= 2;
   };
 
-  const isPointInRect = (rect, clientX, clientY) => {
-    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-  };
+  ${buildElementPickerCoreScript()}
 
-  const getElementDepth = (element) => {
-    let depth = 0;
-    let current = element;
-    while (current && current.parentElement) {
-      depth += 1;
-      current = current.parentElement;
-    }
-    return depth;
-  };
+  const elementPicker = createPptElementPicker({
+    getPageRoot,
+    getContentRoot,
+    isSelectable: isUsableElementTarget,
+    getSelector: buildStableSelector
+  });
 
   const getPointTarget = (origin, clientX, clientY) => {
-    const hitElement = document.elementFromPoint(clientX, clientY);
-    const root = getPageRoot(origin) || getPageRoot(hitElement) || document.querySelector(".ppt-page-root, [data-ppt-guard-root='1']");
-    if (!root) return null;
-    const seen = new Set();
-    const candidates = [];
-    const addCandidate = (element) => {
-      if (!(element instanceof Element)) return;
-      if (seen.has(element)) return;
-      seen.add(element);
-      if (!root.contains(element)) return;
-      if (!isUsableElementTarget(element)) return;
-      const selector = buildStableSelector(element);
-      if (!selector) return;
-      const rect = element.getBoundingClientRect();
-      if (!isPointInRect(rect, clientX, clientY)) return;
-      const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
-      candidates.push({
-        element,
-        area: Math.max(1, rect.width * rect.height),
-        distance: Math.hypot(centerX - clientX, centerY - clientY),
-        depth: getElementDepth(element),
-      });
-    };
-
-    if (typeof document.elementsFromPoint === "function") {
-      document.elementsFromPoint(clientX, clientY).forEach(addCandidate);
-    }
-    root.querySelectorAll("*").forEach(addCandidate);
-
-    candidates.sort((a, b) => a.area - b.area || b.depth - a.depth || a.distance - b.distance);
-    return candidates[0]?.element || null;
+    return elementPicker.pickAtPoint(origin, clientX, clientY);
   };
 
   const pickCanvasTarget = (origin) => {
@@ -609,7 +592,9 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     const seen = new Set();
     target.querySelectorAll("canvas").forEach((canvas) => {
       const parent = canvas.parentElement;
-      const element = parent && parent !== target ? parent : canvas;
+      if (parent === target) return;
+      const element = parent || canvas;
+      if (element === canvas) return;
       if (!element || seen.has(element)) return;
       seen.add(element);
       const rect = element.getBoundingClientRect();
@@ -641,10 +626,10 @@ export function buildEditModeInjectScript(previewScale = 1): string {
         transition: none !important;
       }
       .\${HOVER_CLASS} {
-        cursor: move !important;
+        cursor: crosshair !important;
       }
       .\${HOVER_CLASS} * {
-        cursor: move !important;
+        cursor: crosshair !important;
       }
       #\${HOVER_OVERLAY_ID} {
         position: fixed !important;
@@ -723,7 +708,7 @@ export function buildEditModeInjectScript(previewScale = 1): string {
       html,
       body,
       body * {
-        cursor: move !important;
+        cursor: crosshair !important;
         -webkit-user-select: none !important;
         user-select: none !important;
       }
@@ -744,6 +729,9 @@ export function buildEditModeInjectScript(previewScale = 1): string {
   let overlayElement = null;
   let hoverOverlayElement = null;
   let overlayResizeObserver = null;
+  let lastCycleKey = "";
+  let lastCycleIndex = -1;
+  let lastCycleAt = 0;
 
   // Double-click detection
 
@@ -792,26 +780,77 @@ export function buildEditModeInjectScript(previewScale = 1): string {
   const previousCursor = cursorHost && cursorHost.style ? cursorHost.style.cursor : "";
   const previousRootCursor = rootHost && rootHost.style ? rootHost.style.cursor : "";
   if (rootHost && rootHost.style) {
-    rootHost.style.cursor = "move";
+    rootHost.style.cursor = "crosshair";
   }
   if (cursorHost && cursorHost.style) {
-    cursorHost.style.cursor = "move";
+    cursorHost.style.cursor = "crosshair";
   }
   ensureStyle();
 
   // Kill residual animations from ppt-default-motion (anime.js).
   (() => {
-    if (window.PPT && typeof window.PPT.stopAnimations === "function") {
+    if (window.PPT && typeof window.PPT.finishAnimations === "function") {
+      try { window.PPT.finishAnimations(); } catch (_e) {}
+    } else if (window.PPT && typeof window.PPT.stopAnimations === "function") {
       try { window.PPT.stopAnimations(); } catch (_e) {}
     }
+    try {
+      document.getAnimations?.().forEach((animation) => {
+        try {
+          if (typeof animation.finish === "function") animation.finish();
+          else if (typeof animation.cancel === "function") animation.cancel();
+        } catch (_e) {
+          try { animation.cancel(); } catch (_cancelError) {}
+        }
+      });
+    } catch (_e) {}
+    const forceVisibleIfMotionStopped = (el) => {
+      if (!(el instanceof HTMLElement)) return;
+      const s = el.style;
+      const computed = getComputedStyle(el);
+      const inlineOpacity = s.opacity.trim();
+      const inlineOpacityNumber = inlineOpacity ? Number(inlineOpacity) : NaN;
+      const hasMotionMarker =
+        el.matches("[data-anim], [data-anime], [data-animate], [data-ppt-anim-initialized='1'], .opacity-0");
+      const hasInitialHiddenOpacity =
+        inlineOpacity &&
+        Number.isFinite(inlineOpacityNumber) &&
+        inlineOpacityNumber <= 0.04;
+      const motionMarked =
+        hasMotionMarker ||
+        hasInitialHiddenOpacity;
+      if (motionMarked && Number(computed.opacity || "1") < 0.98) {
+        s.opacity = "1";
+      }
+      if (
+        motionMarked &&
+        inlineOpacity &&
+        /(translate|scale)\\(/i.test(s.transform || "")
+      ) {
+        s.transform = "";
+      }
+    };
     const root = document.querySelector(".ppt-page-root, [data-ppt-guard-root='1']");
     if (!root) return;
     root.querySelectorAll("[style]").forEach((el) => {
+      if (!(el instanceof HTMLElement)) return;
       const s = el.style;
       if (s.transition && (s.transition.includes("transform") || s.transition.includes("opacity"))) {
         s.transition = "";
       }
+      forceVisibleIfMotionStopped(el);
     });
+    // Reset click-triggered data-anim initial hidden state so elements
+    // are visible in edit mode (marked by ppt-runtime during scan).
+    root.querySelectorAll("[data-ppt-anim-initialized='1']").forEach((el) => {
+      if (el instanceof HTMLElement) {
+        el.style.opacity = "";
+        el.style.transform = "";
+      }
+    });
+    root
+      .querySelectorAll("[data-anim], [data-anime], [data-animate], .opacity-0")
+      .forEach(forceVisibleIfMotionStopped);
   })();
 
   // --- Visual helpers ---
@@ -845,6 +884,102 @@ export function buildEditModeInjectScript(previewScale = 1): string {
       width: Math.max(1, right - left),
       height: Math.max(1, bottom - top),
     };
+  };
+
+  const isPointInsideBounds = (bounds, clientX, clientY) => {
+    return (
+      bounds &&
+      clientX >= bounds.left &&
+      clientX <= bounds.left + bounds.width &&
+      clientY >= bounds.top &&
+      clientY <= bounds.top + bounds.height
+    );
+  };
+
+  const zIndexForSort = (element) => {
+    const value = parseInt(window.getComputedStyle(element).zIndex || "0", 10);
+    return Number.isFinite(value) ? value : 0;
+  };
+
+  const compareDocumentPaintOrder = (a, b) => {
+    if (a === b) return 0;
+    const position = a.compareDocumentPosition(b);
+    if (position & Node.DOCUMENT_POSITION_FOLLOWING) return 1;
+    if (position & Node.DOCUMENT_POSITION_PRECEDING) return -1;
+    return 0;
+  };
+
+  const getPointSelectionCandidates = (origin, clientX, clientY, fallbackTarget) => {
+    const root =
+      getPageRoot(origin) ||
+      getPageRoot(fallbackTarget) ||
+      document.querySelector(".ppt-page-root, [data-ppt-guard-root='1']");
+    if (!root) return [];
+    const items = [];
+    const seen = new Set();
+    Array.from(root.querySelectorAll("[data-block-id]")).forEach((element) => {
+      if (!(element instanceof Element)) return;
+      if (seen.has(element)) return;
+      if (!isUsableElementTarget(element)) return;
+      const selector = buildStableSelector(element);
+      if (!selector) return;
+      const bounds = getVisualBounds(element);
+      if (!isPointInsideBounds(bounds, clientX, clientY)) return;
+      seen.add(element);
+      items.push({
+        element,
+        selector,
+        bounds,
+        zIndex: zIndexForSort(element),
+        area: Math.max(1, bounds.width * bounds.height),
+      });
+    });
+    items.sort((a, b) => {
+      if (a.zIndex !== b.zIndex) return b.zIndex - a.zIndex;
+      if (Math.abs(a.area - b.area) > 0.5) return a.area - b.area;
+      return compareDocumentPaintOrder(a.element, b.element);
+    });
+    return items;
+  };
+
+  const pickCycleTarget = (origin, clientX, clientY, fallbackTarget) => {
+    const candidates = getPointSelectionCandidates(origin, clientX, clientY, fallbackTarget);
+    if (candidates.length === 0) return fallbackTarget;
+    if (candidates.length === 1) return candidates[0].element;
+    const key =
+      Math.round(clientX / 8) +
+      ":" +
+      Math.round(clientY / 8) +
+      ":" +
+      candidates.map((item) => item.selector).join("|");
+    const now = Date.now();
+    const startElement =
+      selectedElement && candidates.some((item) => item.element === selectedElement)
+        ? selectedElement
+        : fallbackTarget;
+    if (key !== lastCycleKey || now - lastCycleAt > 1400) {
+      lastCycleIndex = candidates.findIndex((item) => item.element === startElement);
+      if (lastCycleIndex < 0) lastCycleIndex = 0;
+    }
+    lastCycleIndex = (lastCycleIndex + 1) % candidates.length;
+    lastCycleKey = key;
+    lastCycleAt = now;
+    return candidates[lastCycleIndex].element;
+  };
+
+  const pickModifierTarget = (origin, clientX, clientY, fallbackTarget) => {
+    const candidates = getPointSelectionCandidates(origin, clientX, clientY, fallbackTarget);
+    if (candidates.length === 0) return fallbackTarget;
+    const selectedCandidate =
+      selectedElement && candidates.find((item) => item.element === selectedElement);
+    if (selectedCandidate && selectedCandidate.zIndex < 0) {
+      return selectedCandidate.element;
+    }
+    const negativeCandidates = candidates.filter((item) => item.zIndex < 0);
+    if (negativeCandidates.length > 0) {
+      return negativeCandidates[negativeCandidates.length - 1].element;
+    }
+    return pickCycleTarget(origin, clientX, clientY, fallbackTarget);
   };
 
   const ensureHoverOverlay = () => {
@@ -959,6 +1094,39 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     return element.getAttribute("data-block-id") || "";
   };
 
+  const getCaretNodeAtPoint = (clientX, clientY) => {
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    try {
+      if (typeof document.caretPositionFromPoint === "function") {
+        return document.caretPositionFromPoint(clientX, clientY)?.offsetNode || null;
+      }
+      if (typeof document.caretRangeFromPoint === "function") {
+        return document.caretRangeFromPoint(clientX, clientY)?.startContainer || null;
+      }
+    } catch (_error) {}
+    return null;
+  };
+
+  const buildTextTargetAtPoint = (selected, selectedSelector, clientX, clientY) => {
+    if (!(selected instanceof Element)) return undefined;
+    const node = getCaretNodeAtPoint(clientX, clientY);
+    if (!node || node.nodeType !== Node.TEXT_NODE) return undefined;
+    const parent = node.parentElement;
+    if (!(parent instanceof Element) || !selected.contains(parent)) return undefined;
+    const text = String(node.nodeValue || "");
+    if (!normalizeText(text)) return undefined;
+    const parentSelector = parent === selected ? selectedSelector : buildStableSelector(parent);
+    if (!parentSelector) return undefined;
+    const textNodeIndex = Array.prototype.indexOf.call(parent.childNodes || [], node);
+    if (textNodeIndex < 0) return undefined;
+    return {
+      type: "text-node",
+      parentSelector,
+      textNodeIndex,
+      text,
+    };
+  };
+
   const classifyElement = (element, isText) => {
     if (!(element instanceof Element)) return "unknown";
     const tag = element.tagName ? element.tagName.toLowerCase() : "";
@@ -1054,6 +1222,8 @@ export function buildEditModeInjectScript(previewScale = 1): string {
       attrs.muted = element.hasAttribute("muted");
       attrs.loop = element.hasAttribute("loop");
       attrs.autoplay = element.hasAttribute("autoplay");
+      attrs.playsInline = element.hasAttribute("playsinline");
+      attrs.preload = element.getAttribute("preload") || "";
     }
     return attrs;
   };
@@ -1123,6 +1293,7 @@ export function buildEditModeInjectScript(previewScale = 1): string {
       text: {
         editable: isText,
         value: rawText,
+        html: isText ? target.innerHTML : "",
         reason: isText ? undefined : "not-text-only",
       },
     };
@@ -1142,7 +1313,7 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     };
   };
 
-  const emitSelected = (target, selector) => {
+  const emitSelected = (target, selector, textTarget) => {
     const snapshot = collectElementSnapshot(target, selector);
     if (!snapshot) {
       console.log(LOG_PREFIX + JSON.stringify({
@@ -1181,6 +1352,8 @@ export function buildEditModeInjectScript(previewScale = 1): string {
       snapshot,
       isText,
       text: snapshot.text?.value || "",
+      html: snapshot.text?.html || "",
+      textTarget,
       style: isText ? {
         color: snapshot.computed.color || "",
         fontSize: snapshot.computed.fontSize || "",
@@ -1436,29 +1609,43 @@ export function buildEditModeInjectScript(previewScale = 1): string {
       return;
     }
 
-    const target = pickTarget(event.target, event.clientX, event.clientY);
-    if (!target) return;
+    const primaryTarget = pickTarget(event.target, event.clientX, event.clientY);
+    const modifierTarget = event.altKey
+      ? pickModifierTarget(event.target, event.clientX, event.clientY, primaryTarget)
+      : null;
+    const clickTarget = event.altKey ? modifierTarget : primaryTarget;
+    const dragTarget = clickTarget;
+    if (!dragTarget) return;
 
-    const selector = buildStableSelector(target);
+    const selector = buildStableSelector(dragTarget);
     if (!selector) return;
+    const clickSelector = clickTarget ? buildStableSelector(clickTarget) : selector;
+    if (!clickSelector) return;
 
     // All elements: deferred drag. Record start position.
     // < 3px on pointerup = click (emit selected). >= 3px on pointermove = drag.
-    const isAbsConverted = target.hasAttribute("data-ppt-layout-converted");
-    const computed = isAbsConverted ? null : getComputedStyle(target);
+    const isAbsConverted = dragTarget.hasAttribute("data-ppt-layout-converted");
+    const computed = isAbsConverted ? null : getComputedStyle(dragTarget);
     const baseX = isAbsConverted
-      ? parseFloat(target.style.left || "0")
-      : parsePx(target.style.getPropertyValue("--ppt-drag-x") || computed.getPropertyValue("--ppt-drag-x"));
+      ? parseFloat(dragTarget.style.left || "0")
+      : parsePx(dragTarget.style.getPropertyValue("--ppt-drag-x") || computed.getPropertyValue("--ppt-drag-x"));
     const baseY = isAbsConverted
-      ? parseFloat(target.style.top || "0")
-      : parsePx(target.style.getPropertyValue("--ppt-drag-y") || computed.getPropertyValue("--ppt-drag-y"));
-    const elementTag = target.tagName ? target.tagName.toLowerCase() : "";
+      ? parseFloat(dragTarget.style.top || "0")
+      : parsePx(dragTarget.style.getPropertyValue("--ppt-drag-y") || computed.getPropertyValue("--ppt-drag-y"));
+    const elementTag = dragTarget.tagName ? dragTarget.tagName.toLowerCase() : "";
     dragPendingState = {
-      target,
+      target: dragTarget,
       selector,
       elementTag,
+      clickTarget,
+      clickSelector,
+      clickElementTag: clickTarget && clickTarget.tagName ? clickTarget.tagName.toLowerCase() : "",
       startClientX: event.clientX,
       startClientY: event.clientY,
+      textTarget: buildTextTargetAtPoint(dragTarget, selector, event.clientX, event.clientY),
+      clickTextTarget: clickTarget
+        ? buildTextTargetAtPoint(clickTarget, clickSelector, event.clientX, event.clientY)
+        : undefined,
       baseX,
       baseY,
     };
@@ -1471,8 +1658,10 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     if (dragPendingState) {
       const s = dragPendingState;
       dragPendingState = null;
-      setSelected(s.target);
-      emitSelected(s.target, s.selector);
+      const clickTarget = s.clickTarget || s.target;
+      const clickSelector = s.clickSelector || s.selector;
+      setSelected(clickTarget);
+      emitSelected(clickTarget, clickSelector, s.clickTextTarget || s.textTarget);
       return;
     }
 
@@ -1481,6 +1670,8 @@ export function buildEditModeInjectScript(previewScale = 1): string {
         event.target?.releasePointerCapture?.(event.pointerId);
       } catch (_error) {}
       pendingAnchorState = null;
+      if (rootHost && rootHost.style) rootHost.style.cursor = "crosshair";
+      if (cursorHost && cursorHost.style) cursorHost.style.cursor = "crosshair";
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -1585,8 +1776,8 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     } catch (_error) {}
     target.style.willChange = "";
     updateOverlay();
-    if (rootHost && rootHost.style) rootHost.style.cursor = "move";
-    if (cursorHost && cursorHost.style) cursorHost.style.cursor = "move";
+    if (rootHost && rootHost.style) rootHost.style.cursor = "crosshair";
+    if (cursorHost && cursorHost.style) cursorHost.style.cursor = "crosshair";
 
     if (Math.abs(deltaX) >= 0.5 || Math.abs(deltaY) >= 0.5) {
       const movedPageBounds = getPageBoundsFor(target);
@@ -1636,13 +1827,29 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     try {
       const el = document.querySelector(selector);
       if (!el) return;
+      if (typeof patch.html === "string") {
+        el.innerHTML = patch.html;
+      } else
       if (typeof patch.text === "string") {
-        el.textContent = patch.text;
+        const target = patch.textTarget;
+        if (target && target.type === "text-node" && typeof target.parentSelector === "string") {
+          const parent = document.querySelector(target.parentSelector);
+          const index = Number(target.textNodeIndex);
+          const node = parent && Number.isInteger(index) ? parent.childNodes[index] : null;
+          if (node && node.nodeType === Node.TEXT_NODE) {
+            node.nodeValue = patch.text;
+          } else {
+            el.textContent = patch.text;
+          }
+        } else {
+          el.textContent = patch.text;
+        }
       }
       if (patch.style) {
         if (patch.style.color) el.style.setProperty("color", patch.style.color, "important");
         if (patch.style.fontSize) el.style.setProperty("font-size", patch.style.fontSize, "important");
         if (patch.style.fontWeight) el.style.setProperty("font-weight", patch.style.fontWeight, "important");
+        if (patch.style.textAlign) el.style.setProperty("text-align", patch.style.textAlign, "important");
       }
     } catch (_error) {}
   };
@@ -1662,7 +1869,13 @@ export function buildEditModeInjectScript(previewScale = 1): string {
       const el = document.querySelector(selector);
       if (!el || !patch) return;
       if (patch.style) {
-        if (patch.style.zIndex !== undefined) el.style.setProperty("z-index", String(patch.style.zIndex), "important");
+        if (patch.style.zIndex !== undefined) {
+          const position = window.getComputedStyle(el).position;
+          if (!position || position === "static") {
+            el.style.setProperty("position", "relative", "important");
+          }
+          el.style.setProperty("z-index", String(patch.style.zIndex), "important");
+        }
         if (patch.style.opacity !== undefined) el.style.setProperty("opacity", String(patch.style.opacity), "important");
         if (patch.style.backgroundColor) el.style.setProperty("background-color", patch.style.backgroundColor, "important");
         if (patch.style.color) el.style.setProperty("color", patch.style.color, "important");
@@ -1675,14 +1888,17 @@ export function buildEditModeInjectScript(previewScale = 1): string {
         if (patch.style.objectFit) el.style.setProperty("object-fit", patch.style.objectFit, "important");
       }
       if (patch.attrs) {
-        ["alt", "poster", "controls", "muted", "loop", "autoplay"].forEach((name) => {
+        ["alt", "poster", "controls", "muted", "loop", "autoplay", "playsInline", "preload"].forEach((name) => {
           if (!Object.prototype.hasOwnProperty.call(patch.attrs, name)) return;
           const value = patch.attrs[name];
           if (typeof value === "boolean") {
-            if (value) el.setAttribute(name, "");
-            else el.removeAttribute(name);
+            const attrName = name === "playsInline" ? "playsinline" : name;
+            if (value) el.setAttribute(attrName, "");
+            else el.removeAttribute(attrName);
           } else if (value !== undefined && value !== null) {
-            el.setAttribute(name, String(value));
+            const attrName = name === "playsInline" ? "playsinline" : name;
+            if (String(value)) el.setAttribute(attrName, String(value));
+            else el.removeAttribute(attrName);
           }
         });
       }
@@ -1743,6 +1959,7 @@ export function buildEditModeInjectScript(previewScale = 1): string {
       }
       if (layout.width !== undefined) el.style.width = Math.max(1, layout.width).toFixed(1) + "px";
       if (layout.height !== undefined) el.style.height = Math.max(1, layout.height).toFixed(1) + "px";
+      if (layout.width !== undefined || layout.height !== undefined) resizeNestedCharts(el);
       updateOverlay();
     } catch (_error) {}
   };
@@ -1762,23 +1979,36 @@ export function buildEditModeInjectScript(previewScale = 1): string {
     }
   };
 
-  window.__pptEditModeInjectElement = (parentSelector, html) => {
+  window.__pptEditModeInjectElement = (parentSelector, html, insertIndex, selectAfterInsert = true) => {
     try {
-      // Inject into .ppt-page-root so element is inside the page root (required for selection/drag)
-      const parent = document.querySelector('.ppt-page-root') ||
+      const parent = document.querySelector(parentSelector) ||
                      document.querySelector('[data-ppt-guard-root="1"]') ||
-                     document.querySelector(parentSelector);
+                     document.querySelector('.ppt-page-root');
       if (!parent) return;
       const temp = document.createElement('div');
       temp.innerHTML = html;
-      const el = temp.firstElementChild;
-      if (el) {
-        parent.appendChild(el);
-        selectedElement = el;
-        el.classList.add(SELECTED_CLASS);
-        requestAnimationFrame(() => {
-          updateOverlay();
+      const nodes = Array.from(temp.children);
+      if (nodes.length > 0) {
+        const anchor =
+          Number.isInteger(insertIndex) && insertIndex >= 0 && insertIndex < parent.children.length
+            ? parent.children[insertIndex]
+            : null;
+        let selectable = null;
+        nodes.forEach((node) => {
+          if (anchor) parent.insertBefore(node, anchor);
+          else parent.appendChild(node);
+          if (!selectable && node instanceof Element && node.getAttribute("data-block-id")) {
+            selectable = node;
+          }
         });
+        const el = selectable || nodes.find((node) => node instanceof Element) || null;
+        if (el && selectAfterInsert) {
+          selectedElement = el;
+          el.classList.add(SELECTED_CLASS);
+          requestAnimationFrame(() => {
+            updateOverlay();
+          });
+        }
       }
     } catch (_error) {}
   };

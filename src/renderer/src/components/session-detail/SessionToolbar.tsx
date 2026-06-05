@@ -6,6 +6,7 @@ import {
   FileSearch,
   History,
   Image as ImageIcon,
+  LayoutTemplate,
   Loader2,
   Monitor,
   Package,
@@ -41,6 +42,7 @@ export function SessionToolbar({
   onOpenHistory,
   onOpenPreview,
   onRevealFile,
+  onSaveTemplate,
   onPresent
 }: {
   hasPages: boolean
@@ -58,14 +60,17 @@ export function SessionToolbar({
   onOpenHistory: () => void
   onOpenPreview: () => void
   onRevealFile: () => void
+  onSaveTemplate?: () => void
   onPresent?: () => void
 }): React.JSX.Element {
   const t = useT()
+
   const isExportingPdf = useSessionDetailUiStore((state) => state.isExportingPdf)
   const isExportingPng = useSessionDetailUiStore((state) => state.isExportingPng)
   const isExportingPptx = useSessionDetailUiStore((state) => state.isExportingPptx)
   const isExportingSlidePack = useSessionDetailUiStore((state) => state.isExportingSlidePack)
   const isExportingSessionZip = useSessionDetailUiStore((state) => state.isExportingSessionZip)
+  const isExportingImagePdf = isExportingPng || isExportingPdf
   const isExportingPackage = isExportingSlidePack || isExportingSessionZip
   const isExporting =
     isExportingPdf ||
@@ -93,6 +98,26 @@ export function SessionToolbar({
           </TooltipTrigger>
           <TooltipContent side="bottom" align="start">
             {t('sessionDetail.historyTooltip')}
+          </TooltipContent>
+        </Tooltip>
+      )}
+      {hasPages && onSaveTemplate && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={toolbarButtonClass}
+              onClick={onSaveTemplate}
+              disabled={isExporting}
+            >
+              <LayoutTemplate className={toolbarIconClass} />
+              {t('sessionDetail.saveTemplate')}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" align="start">
+            {t('sessionDetail.saveTemplateTooltip')}
           </TooltipContent>
         </Tooltip>
       )}
@@ -174,38 +199,35 @@ export function SessionToolbar({
         </DropdownMenu>
       )}
       {hasPages && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={toolbarButtonClass}
-          onClick={onExportPng}
-          disabled={isExportingPng}
-        >
-          {isExportingPng ? (
-            <Loader2 className={cn(toolbarIconClass, 'animate-spin')} />
-          ) : (
-            <ImageIcon className={toolbarIconClass} />
-          )}
-          {t('sessionDetail.exportPng')}
-        </Button>
-      )}
-      {hasPages && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className={toolbarButtonClass}
-          onClick={onExportPdf}
-          disabled={isExportingPdf}
-        >
-          {isExportingPdf ? (
-            <Loader2 className={cn(toolbarIconClass, 'animate-spin')} />
-          ) : (
-            <FileDown className={toolbarIconClass} />
-          )}
-          {t('sessionDetail.exportPdf')}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={cn(toolbarButtonClass, 'gap-1')}
+              disabled={isExportingImagePdf}
+            >
+              {isExportingImagePdf ? (
+                <Loader2 className={cn(toolbarIconClass, 'animate-spin')} />
+              ) : (
+                <FileDown className={toolbarIconClass} />
+              )}
+              {t('sessionDetail.exportImagePdf')}
+              {!isExportingImagePdf && <ChevronDown className="h-3 w-3" />}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-[12rem]">
+            <DropdownMenuItem onClick={onExportPng}>
+              <ImageIcon className={dropdownItemIconClass} />
+              {t('sessionDetail.exportPng')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onExportPdf}>
+              <FileDown className={dropdownItemIconClass} />
+              {t('sessionDetail.exportPdf')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
       {canPreview && (
         <Tooltip>

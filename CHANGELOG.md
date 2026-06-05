@@ -1,5 +1,117 @@
 # 更新日志 / Changelog
 
+## 2026-06-02 · v2.0.14
+
+### 中文
+
+- 新增 AI 生图工作流：编辑页右侧新增图片生成模式，可围绕当前页面生成配图素材，并支持将生成图片添加到画布、设置为页面背景或直接定位本地文件。
+- 新增多生图模型接入配置：目前支持即梦、Agnes AI、硅基流动、OpenAI-compatible 图片接口和 Gemini 图片生成，并可在设置页独立管理、启用和验证生图模型。
+- 新增配图提示词辅助：支持「大纲提示词」和「风格提示词」，可根据当前页标题、大纲、页面视觉风格和用户输入生成更适合当前页面的配图描述；
+- 新增统一模型切换体验：创建、模板复用、风格导入、图片解析等需要模型参与的操作，都可以在执行前选择本次使用的模型，减少频繁进入设置页切换的成本，多模型切换更方便。
+- 新增页面大纲：编辑页支持读取、展示和编辑修改页面大纲，创建、导入、页面管理和单页补写流程中的页面上下文更清晰。
+- 新增 HTTP/SOCKS 代理支持：可为模型服务配置代理，提升访问 Gemini 等外部服务时的网络兼容性。
+- 新增 macOS Intel 架构支持配置，提升 Apple Silicon 与 Intel Mac 的安装包兼容性。
+- 优化对话创作： 增加对话历史记录，用户可以查看和管理之前的对话记录，方便后续参考和继续创作。
+- 优化设置页：增加一些配置帮助说明。
+- 优化模板复用体验：从模板创建演示时的参数确认、模型选择和生成前校验更完整，减少模板结构异常导致的失败。
+- 优化导入与解析稳定性：文档解析、大纲归一化、PPTX 导入和风格抽取流程更稳，对复杂输入的容错更好。
+- 新增添加文字功能：编辑页可直接添加文字元素，文字编辑体验进一步优化。
+- 优化编辑体验：改进文字选中、字体编辑、图层检查和元素锚点定位，减少重叠元素或复杂页面中的误选和编辑偏差。
+- 优化技能提示词：更新图表与布局技能说明，生成图表、版式和页面结构时更贴合演示文稿场景。
+
+### English
+
+- Added AI image generation: create slide visuals from the editor, then add them to the canvas, set them as the slide background, or reveal the generated file locally.
+- Added image model configuration: connect Jimeng, Agnes AI, SiliconFlow, OpenAI-compatible image APIs, and Gemini image generation from Settings.
+- Added image prompt helpers: use "Outline prompt" and "Style prompt" to turn the current slide outline, visual style, and your own idea into a better image description.
+- Added model selection at run time: choose which model to use before creation, template reuse, style import, image parsing, and other AI-powered actions.
+- Added slide outlines: the editor can now read, display, and edit slide outlines, making the current slide context clearer during editing, import, page management, and single-slide regeneration.
+- Added HTTP/SOCKS proxy support: configure a proxy for model services to improve connectivity with external providers such as Gemini.
+- Added macOS Intel support: packaging configuration now better supports both Apple Silicon and Intel Macs.
+- Improved chat-to-create: conversation history is now easier to keep, review, and continue from during creative planning.
+- Improved Settings: added helpful configuration guidance.
+- Improved template reuse: stronger parameter confirmation, model selection, and pre-generation checks reduce failures from invalid template structure.
+- Improved import and parsing stability: document parsing, outline normalization, PPTX import, and style extraction now handle complex inputs more reliably.
+- Added text insertion: add text elements directly in the editor, with further improvements to text editing.
+- Improved editing: text selection, font editing, layer inspection, and element anchoring are more accurate on complex or overlapping slide elements.
+- Improved built-in skill prompts: chart and layout instructions now better match presentation-generation scenarios.
+
+## 2026-05-29 · v2.0.13
+
+### 中文
+
+- 新增动画效果增强：生成页面时支持更丰富的入场动画效果，包括淡入、飞入、擦除、缩放、旋转等，并支持逐条出现和交错展示，演示内容可按讲述节奏逐步展开。
+- 新增 PPTX 动画导出：导出可编辑 PPTX 时保留动画效果和页面切换转场，导出后可在 PowerPoint或者wps中直接演示播放。
+- 新增 PPTX 动画导入：导入 PPTX 时自动解析并还原原稿的动画效果，无需手动重新设置。
+- 新增富文本编辑：编辑文字时可使用加粗、斜体、下划线、颜色和字号等格式，编辑体验更接近专业文档工具。
+- 优化元素选中精度：点击重叠或嵌套元素时能更精准地定位到目标文字，不再被上层元素遮挡或误选。
+- 优化生成质量：页面布局、图表和动画的生成效果更稳定，版式更合理、图表更准确、动画更自然。
+- 优化更新提醒：新版本通知改为弹窗，可查看版本对比、选择下载方式和查看更新日志。
+- 优化创建防重复提交：创建演示稿时防止重复点击导致创建多个会话。
+
+### English
+
+- Added animation enhancements: generated slides now support richer entrance animations including fade, fly-in, wipe, zoom, and spin, with staggered reveals and click-by-click display so content unfolds with the speaker's rhythm.
+- Added PPTX animation export: exported editable PPTX files now preserve animation effects and slide transitions, playable directly in PowerPoint.
+- Added PPTX animation import: imported PPTX files now automatically parse and restore the original animation effects, no manual setup needed.
+- Added rich text editing: edit text with bold, italic, underline, color, and font size formatting for a more professional editing experience.
+- Improved element selection precision: clicking overlapping or nested elements now accurately targets the intended text, no longer blocked or misdirected by upper-layer elements.
+- Improved generation quality: slide layout, charts, and animations are more stable and accurate with better composition and more natural motion.
+- Improved update notification: new version alerts now appear as a dialog with version comparison, download options, and changelog link.
+- Improved session creation guard: prevents duplicate sessions from accidental double-clicks.
+
+## 2026-05-27 · v2.0.12
+
+### 中文
+
+- 新增模板库：支持将已生成或已编辑的演示保存为模板，管理模板名称、描述和标签，并在模板页统一预览、编辑、删除和复用。
+- 新增从模板创建ppt会话：可直接复用模板生成可编辑会话，也可输入新主题/大纲或上传文档解析后，沿用模板视觉系统重新生成内容。
+- 新增 PPTX 文件可导入为模板：模板页可导入 `.pptx` 作为模板，自动解析页面、抽取视觉风格并生成模板设计契约。
+- 新增页面标题编辑：编辑页支持修改单页标题。
+- 新增空白页创建：可选择已有页面作为版式基础创建到末尾，并自动清空可见文字，适合快速延展同风格页面。
+- 优化首页 PPTX 快速导入编辑入口：首页可直接导入 `.pptx` 创建可编辑会话，并展示导入进度和提示信息。
+- 优化编辑/检选体验：进入编辑和 AI 检选时会结束残留动画，避免带动画页面出现元素隐藏、停在半透明状态或无法选中的问题。
+- 优化视频元素编辑与播放：可以对视频元素进行编辑，包括调整播放速度、音量、循环播放、自动播放等。
+- 优化导入与运行时稳定性：会话导入更好地兼容扁平 ZIP 和复杂压缩包，导入会话补齐默认设计契约；
+- 修复图表问题：图表类目轴bug、横向柱状图 tooltip 和 0 值数据展示更准确。
+- 修复页面管理问题：修复页面管理时的动画问题，避免页面切换时元素隐藏、停在半透明状态或无法选中的问题。
+
+### English
+
+- Added Template Library: save generated or edited presentations as templates, manage template names, descriptions, and tags, then preview, edit, delete, and reuse them from the Templates page.
+- Added PPT session creation from templates: reuse a template to create an editable session directly, or enter a new topic/outline or upload a document to regenerate content while keeping the template's visual system.
+- Added PPTX import as templates: import `.pptx` files from the Templates page, automatically parse slides, extract the visual style, and create a template design contract.
+- Added page title editing: edit individual slide titles from the editor.
+- Added blank page creation: choose an existing slide as the layout base, create a new page at the end of the deck, and clear visible text for fast same-style page expansion.
+- Improved the quick PPTX import editing entry on Home: import a `.pptx` directly from the Home page to create an editable session with progress and warning feedback.
+- Improved edit and inspect modes: residual animations are finished before editing or AI inspection, reducing hidden, half-transparent, or hard-to-select elements on animated slides.
+- Improved video element editing and playback: video elements can now be edited, including playback speed, volume, loop playback, autoplay, and more.
+- Improved import and runtime stability: session import better handles flat ZIPs and complex archives, and imported sessions receive a default design contract.
+- Fixed chart issues: category-axis bugs, horizontal bar chart tooltips, and zero-value data now render more accurately.
+- Fixed page management issues: resolved animation problems during page management, reducing hidden, half-transparent, or hard-to-select elements when switching pages.
+
+## 2026-05-24 · v2.0.11
+
+### 中文
+
+- 新增对话创作模式：先通过多轮对话梳理主题、资料、受众、结构和每页重点，再确认参数生成完整演示稿。适合需求尚不清晰、资料较复杂或需要先共同推敲大纲的场景，再去生成创作。
+- 新增演讲稿创作：支持为整套幻灯片或当前页生成演讲稿，内置正式演讲、轻松对话、叙事风格和自定义风格，并可复制或直接查看文件。
+- 新增 Gemini Provider：设置页支持配置 Google Gemini，可用于生成、编辑和对话创作。
+- 重构动画系统：支持更自然的入场动画、错峰展示和点击逐条出现，让演示内容可以按讲述节奏逐步展开。
+- 优化演示播放：键盘导航、鼠标点击和逐条展示的衔接更顺畅，带点击节奏的页面不容易误翻页。
+- 优化预览与导出稳定性：带动画、图表和复杂内容的页面在预览、缩略图和导出时显示更可靠。
+- 优化生成预览： 生成的时候支持边生成边预览，无需等待生成完成，方便确认生成效果。
+
+### English
+
+- Added Chat to Create: first use a multi-turn conversation to clarify the topic, materials, audience, structure, and key points for each slide, then confirm the parameters and generate the full presentation. It is designed for unclear requirements, complex materials, or scenarios where you want to shape the outline together before creation.
+- Added speaker script creation: generate scripts for the full deck or the current slide, with built-in formal, casual conversational, storytelling, and custom styles. Scripts can be copied or opened directly as a file.
+- Added Gemini Provider: Google Gemini can now be configured in Settings and used for generation, editing, and Chat to Create.
+- Rebuilt the animation system: supports more natural entrance animations, staggered reveals, and click-by-click content display, so presentation content can unfold with the speaker's rhythm.
+- Improved presentation playback: keyboard navigation, mouse clicks, and step-by-step reveals now work together more smoothly, making click-paced pages less likely to accidentally advance to the next slide.
+- Improved preview and export stability: slides with animations, charts, and complex content now render more reliably in previews, thumbnails, and exports.
+- Improved generation preview: slides can now be previewed while they are still being generated, so you no longer need to wait for the full generation to finish before checking the result.
+
 ## 2026-05-18 · v2.0.10
 
 ### 中文

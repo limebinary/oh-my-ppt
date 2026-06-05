@@ -8,6 +8,7 @@ import type { SessionDeckGenerationContext } from './types'
 import { validateHtmlContent, validatePersistedPageHtml } from './html-utils'
 import { buildSessionAssetHeadTags } from '../ipc/engine/page-assets'
 import { normalizeCreativePageFragment } from './page-fragment-normalizer'
+import { validateTemplateSkeletonPreserved } from '../ipc/templates/template-skeleton-validator'
 
 const uiText = (locale: 'zh' | 'en' | undefined, zh: string, en: string): string =>
   locale === 'en' ? en : zh
@@ -71,7 +72,11 @@ export const BASE_PAGE_STYLE_TAG = `<style id="ppt-page-guard-style">
     font-family: var(--ppt-title-font);
   }
   .ppt-page-content .text-xs,
-  .ppt-page-content .text-sm {
+  .ppt-page-content .text-sm,
+  .ppt-page-content [class*="text-[12px]"],
+  .ppt-page-content [class*="text-[13px]"],
+  .ppt-page-content [class*="text-[14px]"],
+  .ppt-page-content [class*="text-[15px]"] {
     font-size: 1rem !important;
     line-height: 1.5 !important;
   }
@@ -99,7 +104,6 @@ export const BASE_PAGE_STYLE_TAG = `<style id="ppt-page-guard-style">
   .ppt-page-content [data-block-id*="chart"],
   .ppt-page-content [data-block-id*="graph"],
   .ppt-page-content [data-block-id*="plot"] {
-    min-height: 240px;
     min-width: 0;
   }
   [data-role="title"] h1,
@@ -203,40 +207,22 @@ export const FIT_SCRIPT = `<script id="ppt-page-fit">
 })();
 </script>`
 
-export const VIDEO_AUTOPLAY_SCRIPT = `<script id="ppt-video-autoplay">
+export const VIDEO_INTERACTION_SCRIPT = `<script id="ppt-video-interaction">
 (() => {
-  const playVideos = () => {
+  const prepareVideos = () => {
     document.querySelectorAll("video").forEach((video) => {
-      video.muted = true;
-      video.defaultMuted = true;
-      video.autoplay = true;
-      video.loop = true;
       video.playsInline = true;
-      video.preload = "auto";
-      video.removeAttribute("controls");
-      const attempt = () => {
-        const result = video.play();
-        if (result && typeof result.catch === "function") {
-          result.catch(() => {});
-        }
-      };
-      if (video.readyState >= 2) {
-        attempt();
-      } else {
-        video.addEventListener("canplay", attempt, { once: true });
-        video.load();
+      if (!video.hasAttribute("preload")) {
+        video.preload = "metadata";
       }
     });
   };
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", playVideos, { once: true });
+    document.addEventListener("DOMContentLoaded", prepareVideos, { once: true });
   } else {
-    playVideos();
+    prepareVideos();
   }
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) playVideos();
-  });
-  window.addEventListener("pageshow", playVideos);
+  window.addEventListener("pageshow", prepareVideos);
 })();
 </script>`
 
@@ -267,17 +253,52 @@ const DEFAULT_MOTION_SCRIPT = `<script id="ppt-default-motion">
     });
   }
 
-  function runMotion() {
-    const root = document.querySelector(".ppt-page-root");
-    if (!root) return;
-    const targets = Array.from(
+
+  function runDataAnimMotion(root) {
+    var pptApi = globalThis.PPT;
+    if (!pptApi || typeof pptApi.scanDataAnim !== "function") return false;
+    var config = pptApi.scanDataAnim(root);
+    if (!config || (!config.load.length && !config.click.length)) return false;
+
+    // Execute load-triggered animations
+    if (config.load.length > 0 && typeof pptApi.executeDataAnim === "function") {
+      pptApi.executeDataAnim(config.load);
+    }
+
+    // Wire click-triggered animations
+    if (config.click.length > 0 && pptApi.clicks && typeof pptApi.clicks.on === "function") {
+      var clickDefs = config.click;
+      clickDefs.forEach(function (animDef, idx) {
+        var clickNum = idx + 1;
+        pptApi.clicks.on(clickNum, function () {
+          var single = [animDef];
+          if (typeof pptApi.executeDataAnim === "function") {
+            pptApi.executeDataAnim(single);
+          } else {
+            // Fallback: direct animate
+            pptApi.animate(animDef.targets, {
+              opacity: [0, 1],
+              translateY: [20, 0],
+              duration: animDef.duration,
+              easing: animDef.easing
+            });
+          }
+        });
+      });
+    }
+
+    return true;
+  }
+
+  function runLegacyMotion(root) {
+    var targets = Array.from(
       root.querySelectorAll(".opacity-0, [data-anime], [data-animate], h1, h2, h3, p, li, .card, .panel, .text-section, .diagram-section, .timeline-node, section, section > *")
     ).slice(0, 16);
     if (targets.length === 0) {
       revealFallback(root);
       return;
     }
-    const pptApi = globalThis.PPT;
+    var pptApi = globalThis.PPT;
     if (pptApi && typeof pptApi.animate === "function") {
       try {
         pptApi.animate(targets, {
@@ -285,27 +306,35 @@ const DEFAULT_MOTION_SCRIPT = `<script id="ppt-default-motion">
           translateY: [20, 0],
           easing: "easeOutCubic",
           duration: 560,
-          delay: (_el, i) => i * 45,
+          delay: function (_el, i) { return i * 45; },
         });
-        // If custom animation failed and left nodes hidden, force visibility once.
-        window.setTimeout(() => revealFallback(root), 720);
+        window.setTimeout(function () { revealFallback(root); }, 720);
         return;
       } catch (_err) {
         revealFallback(root);
         return;
       }
     }
-    targets.forEach((el, i) => {
-      const node = el;
+    targets.forEach(function (el, i) {
+      var node = el;
       node.style.opacity = "0";
       node.style.transform = "translateY(14px)";
       node.style.transition = "opacity 420ms ease, transform 420ms ease";
-      window.setTimeout(() => {
+      window.setTimeout(function () {
         node.style.opacity = "1";
         node.style.transform = "translateY(0)";
       }, i * 40);
     });
     revealFallback(root);
+  }
+
+  function runMotion() {
+    var root = document.querySelector(".ppt-page-root");
+    if (!root) return;
+    // Prefer declarative data-anim over legacy selectors
+    if (!runDataAnimMotion(root)) {
+      runLegacyMotion(root);
+    }
   }
 
   if (document.readyState === "loading") {
@@ -490,8 +519,7 @@ function isMarginUtilityClass(cls: string): boolean {
 function hasFixedChartHeightClass(classes: Iterable<string>): boolean {
   return Array.from(classes).some((cls) => {
     const base = classBaseName(cls)
-    if (/^h-(?:full|screen|dvh|svh|lvh|auto)$/.test(base)) return false
-    return /^h-(?:\[[^\]]+\]|(?!0\b)\d+)/.test(base)
+    return /^h-\[\s*(?!0+(?:\.0+)?px\b)\d+(?:\.\d+)?px\s*\]$/.test(base)
   })
 }
 
@@ -499,8 +527,8 @@ function isUnstableChartFrameLayoutClass(cls: string): boolean {
   const base = classBaseName(cls)
   return (
     base === 'flex-1' ||
-    /^h-(?:full|screen|dvh|svh|lvh|auto)$/.test(base) ||
-    /^min-h-(?:full|screen|dvh|svh|lvh|auto)$/.test(base) ||
+    (/^h-/.test(base) && !/^h-\[\s*(?!0+(?:\.0+)?px\b)\d+(?:\.\d+)?px\s*\]$/.test(base)) ||
+    /^min-h-/.test(base) ||
     /^max-h-/.test(base)
   )
 }
@@ -509,6 +537,10 @@ function hasFixedChartHeightStyle(styleRaw: string): boolean {
   return /(?:^|;)\s*height\s*:\s*(?!\s*(?:auto|0(?:px|rem|em|%)?|100%|inherit|initial|unset)\b)[^;]+/i.test(
     styleRaw
   )
+}
+
+function hasDataAnim(html: string): boolean {
+  return /\bdata-anim\b/i.test(html)
 }
 
 function hasCustomPageAnimation(html: string): boolean {
@@ -552,6 +584,8 @@ function preprocessPageHtml(html: string): string {
     // 2. Stabilize chart canvases
     $('canvas').each((_, node) => {
       const canvas = $(node)
+      canvas.removeAttr('width')
+      canvas.removeAttr('height')
       const originalCanvasClasses = splitClassNames(canvas.attr('class') || '')
       const wrapperClasses = originalCanvasClasses.filter(isMarginUtilityClass)
       const canvasClassSet = new Set(
@@ -588,15 +622,14 @@ function preprocessPageHtml(html: string): string {
       parent.attr('class', Array.from(parentClassSet).join(' '))
     })
 
-    // 3. Normalize embedded videos for kiosk-style slide playback.
+    // 3. Normalize embedded videos for click-to-play slide playback.
     $('video').each((_, node) => {
       const video = $(node)
-      video.removeAttr('controls')
-      video.attr('autoplay', '')
-      video.attr('muted', '')
-      video.attr('loop', '')
+      video.attr('controls', '')
       video.attr('playsinline', '')
-      video.attr('preload', 'auto')
+      if (video.attr('preload') === undefined) {
+        video.attr('preload', 'metadata')
+      }
     })
 
     // 4. Strip unsafe hidden states (opacity-0, visibility:hidden)
@@ -661,7 +694,7 @@ const normalizeAndInjectPageRuntime = (
   return buildScaffoldDocument({
     pageId,
     innerContent: fragment,
-    includeDefaultMotion: !hasCustomPageAnimation(content),
+    includeDefaultMotion: hasDataAnim(content) || !hasCustomPageAnimation(content),
     projectDir,
     designFonts
   }).then(syncRootBackgroundFromScaffold)
@@ -688,6 +721,21 @@ function repairMalformedCreativeFragment(content: string): string | null {
   } catch {
     return null
   }
+}
+
+function enforceMinimumFontSize(html: string): string {
+  return html.replace(
+    /font-size\s*:\s*([0-9.]+)\s*(px|rem|em)/gi,
+    (match, valueStr, unit) => {
+      const value = parseFloat(valueStr)
+      const u = unit.toLowerCase()
+      const px = u === 'px' ? value : u === 'rem' || u === 'em' ? value * 16 : value
+      if (px > 0 && px < 16) {
+        return `font-size: 1rem`
+      }
+      return match
+    }
+  )
 }
 
 function countHtmlTag(content: string, tagName: string): { open: number; close: number } {
@@ -767,7 +815,7 @@ async function buildScaffoldDocument(args: {
       </div>
     </main>
     ${FIT_SCRIPT}
-    ${VIDEO_AUTOPLAY_SCRIPT}
+    ${VIDEO_INTERACTION_SCRIPT}
     ${motionScript}
   </body>
 </html>`
@@ -925,19 +973,36 @@ export function createPageWriteTools(args: {
       agentName
     })
     const result = await serializedWrite(context.projectDir, async () => {
-      if (!context.designContract?.titleFont || !context.designContract?.bodyFont) {
-        throw new Error('design contract 缺少 titleFont/bodyFont，无法写入页面字体。')
-      }
       const designFonts = {
-        titleFont: context.designContract.titleFont,
-        bodyFont: context.designContract.bodyFont
+        titleFont: context.designContract?.titleFont || 'Inter',
+        bodyFont: context.designContract?.bodyFont || 'Inter'
       }
+      const fixedContent = enforceMinimumFontSize(preparedContent.content)
       const normalized = await normalizeAndInjectPageRuntime(
-        preparedContent.content,
+        fixedContent,
         resolvedPageId,
         context.projectDir,
         designFonts
       )
+      if (context.templatePageReadRequired) {
+        const beforeHtml = await fs.promises.readFile(targetPath, 'utf-8').catch(() => '')
+        const missingTemplateRefs = validateTemplateSkeletonPreserved(beforeHtml, normalized)
+        if (missingTemplateRefs.length > 0) {
+          const detail = missingTemplateRefs.slice(0, 8).join(', ')
+          emitNormalizedToolStatus(config, {
+            label: `模板骨架校验失败 ${resolvedPageId}`,
+            detail: `写入内容丢失模板背景/装饰资源: ${detail}`,
+            progress: 60,
+            pageId: resolvedPageId
+          })
+          throw new Error(
+            [
+              `模板骨架资源丢失 (${resolvedPageId})：${detail}`,
+              '请重新读取目标模板页，把背景图、纹理、装饰图、mask/overlay 或 CSS url(...) 对应结构保留在 update_template_page_file 的 content 中。'
+            ].join(' ')
+          )
+        }
+      }
       const persistedValidation = validatePersistedPageHtml(normalized, resolvedPageId)
       if (!persistedValidation.valid) {
         emitNormalizedToolStatus(config, {
@@ -995,9 +1060,13 @@ export function createPageWriteTools(args: {
           })
         },
         {
-          name: 'update_single_page_file',
+          name: context.templatePageReadRequired
+            ? 'update_template_page_file'
+            : 'update_single_page_file',
           description:
-            'Single-page edit tool. Pass pageId and content explicitly; the tool validates pageId against the current single-page context to avoid modifying other pages.',
+            context.templatePageReadRequired
+              ? 'Template-preserving page generation tool. Pass pageId and a complete creative page fragment based on the copied template page. It validates pageId and rejects writes that drop template background/decorative CSS url(...) resources, SVG image hrefs, or decorative local media references.'
+              : 'Single-page edit tool. Pass pageId and content explicitly; the tool validates pageId against the current single-page context to avoid modifying other pages.',
           schema: z.object({
             pageId: z
               .string()
@@ -1007,7 +1076,9 @@ export function createPageWriteTools(args: {
             content: z
               .string()
               .describe(
-                'Complete creative page HTML fragment only. The tool will add section[data-page-scaffold], main[data-role="content"], editable data-block-id attributes, and the runtime page frame when needed. Do not pass <!doctype>, <html>, <head>, <body>, .ppt-page-root, .ppt-page-content, .ppt-page-fit-scope, data-ppt-guard-root, or any runtime shell markup.'
+                context.templatePageReadRequired
+                  ? 'Complete creative page HTML fragment based on the copied template page. Keep template background/decorative layers and exact local asset references from the inspected template page while replacing old business text/data. The tool will add the runtime page frame when needed. Do not pass <!doctype>, <html>, <head>, <body>, .ppt-page-root, .ppt-page-content, .ppt-page-fit-scope, data-ppt-guard-root, or runtime shell markup.'
+                  : 'Complete creative page HTML fragment only. The tool will add section[data-page-scaffold], main[data-role="content"], editable data-block-id attributes, and the runtime page frame when needed. Do not pass <!doctype>, <html>, <head>, <body>, .ppt-page-root, .ppt-page-content, .ppt-page-fit-scope, data-ppt-guard-root, or any runtime shell markup.'
               )
           })
         }

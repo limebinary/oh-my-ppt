@@ -4,10 +4,12 @@ import type {
 } from '../../preview/edit-mode-script'
 
 export interface ElementEditDraft {
+  html: string
   text: string
   color: string
   fontSize: string
   fontWeight: string
+  textAlign: string
   layoutX: string
   layoutY: string
   layoutWidth: string
@@ -22,6 +24,8 @@ export interface ElementEditDraft {
   muted: boolean
   loop: boolean
   autoplay: boolean
+  playsInline: boolean
+  preload: string
 }
 
 export interface ElementEditorProps {

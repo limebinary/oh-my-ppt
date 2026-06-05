@@ -1,10 +1,10 @@
 (function initPptRuntime(global) {
   if (!global || typeof global !== "object") return;
-  // @ohmyppt-ppt-runtime:arcsin1:v1.2.1
+  // @ohmyppt-ppt-runtime:arcsin1:v2.0.13
 
   var ppt = global.PPT && typeof global.PPT === "object" ? global.PPT : (global.PPT = {});
-  if (ppt.__runtimeVersion === "1.2.0") return;
-  ppt.__runtimeVersion = "1.2.0";
+  if (ppt.__runtimeVersion === "2.0.13") return;
+  ppt.__runtimeVersion = "2.0.13";
 
   function resolveSearchParams() {
     try {
@@ -155,6 +155,8 @@
       update: true,
       keyframes: true,
       direction: true,
+      alternate: true,
+      reversed: true,
     };
 
     targets.forEach(function (el, index) {
@@ -303,6 +305,33 @@
     return normalizeChartScalar(value);
   }
 
+  function isLikelyCategoryScale(config, scaleKey, scale) {
+    if (scale && scale.type === "category") return true;
+    if (scale && scale.type) return false;
+    var data = config && config.data && typeof config.data === "object" ? config.data : null;
+    if (!data || !Array.isArray(data.labels)) return false;
+    var options = config && config.options && typeof config.options === "object" ? config.options : null;
+    var defaultCategoryAxis = options && options.indexAxis === "y" ? "y" : "x";
+    return scaleKey === defaultCategoryAxis;
+  }
+
+  function resolveChartTooltipValue(context) {
+    if (!context) return "";
+    var chartOptions = context.chart && context.chart.options && typeof context.chart.options === "object"
+      ? context.chart.options
+      : null;
+    var indexAxis = chartOptions && chartOptions.indexAxis === "y" ? "y" : "x";
+    var parsed = context.parsed && typeof context.parsed === "object" ? context.parsed : null;
+    if (parsed) {
+      var valueAxis = indexAxis === "y" ? "x" : "y";
+      if (parsed[valueAxis] !== undefined) return parsed[valueAxis];
+      if (parsed.y !== undefined) return parsed.y;
+      if (parsed.x !== undefined) return parsed.x;
+    }
+    if (context.formattedValue !== undefined) return context.formattedValue;
+    return context.raw;
+  }
+
   function ensureChartNumberFormatters(config) {
     if (!config || typeof config !== "object") return;
     var options = config.options && typeof config.options === "object" ? config.options : (config.options = {});
@@ -313,9 +342,18 @@
         if (!scale || typeof scale !== "object") return;
         var ticks = scale.ticks && typeof scale.ticks === "object" ? scale.ticks : (scale.ticks = {});
         if (typeof ticks.callback !== "function") {
-          ticks.callback = function (value) {
-            return typeof value === "number" ? formatChartNumber(value, 6) : String(value);
-          };
+          if (isLikelyCategoryScale(config, scaleKey, scale)) {
+            ticks.callback = function (value) {
+              if (this && typeof this.getLabelForValue === "function") {
+                return this.getLabelForValue(value);
+              }
+              return String(value == null ? "" : value);
+            };
+          } else {
+            ticks.callback = function (value) {
+              return typeof value === "number" ? formatChartNumber(value, 6) : String(value);
+            };
+          }
         }
       });
     }
@@ -325,9 +363,7 @@
     if (typeof callbacks.label !== "function") {
       callbacks.label = function (context) {
         var label = context && context.dataset && context.dataset.label ? String(context.dataset.label) + ": " : "";
-        var value = context && context.parsed && typeof context.parsed === "object"
-          ? (context.parsed.y !== undefined ? context.parsed.y : context.parsed.x)
-          : context && context.raw;
+        var value = resolveChartTooltipValue(context);
         return label + (typeof value === "number" ? formatChartNumber(value, 6) : String(value == null ? "" : value));
       };
     }
@@ -423,6 +459,8 @@
     };
   }
 
+  var _activeAnimations = new Set();
+
   ppt.animate = function () {
     var args = Array.prototype.slice.call(arguments);
     if (isPrintMode) {
@@ -448,6 +486,16 @@
     if (animation && animation.finished && typeof animation.finished.then === "function") {
       trackPrintTask(animation.finished);
     }
+    if (animation && typeof animation.pause === "function") {
+      _activeAnimations.add(animation);
+      var origFinished = animation.finished;
+      if (origFinished && typeof origFinished.then === "function") {
+        origFinished.then(
+          function () { _activeAnimations.delete(animation); },
+          function () { _activeAnimations.delete(animation); }
+        );
+      }
+    }
     return animation;
   };
 
@@ -470,6 +518,587 @@
       return runtimeAnime.timeline.apply(runtimeAnime, args);
     }
     return buildTimeline(runtimeAnime).apply(null, args);
+  };
+
+  ppt.stopAnimations = function () {
+    _activeAnimations.forEach(function (anim) {
+      try { if (typeof anim.pause === "function") anim.pause(); } catch (_err) {}
+    });
+  };
+
+  ppt.finishAnimations = function () {
+    _activeAnimations.forEach(function (anim) {
+      try {
+        if (typeof anim.complete === "function") {
+          anim.complete();
+          return;
+        }
+        if (typeof anim.seek === "function" && Number.isFinite(Number(anim.duration))) {
+          anim.seek(Number(anim.duration));
+        }
+        if (typeof anim.pause === "function") anim.pause();
+      } catch (_err) {}
+    });
+  };
+
+  ppt.resumeAnimations = function () {
+    _activeAnimations.forEach(function (anim) {
+      try { if (typeof anim.play === "function") anim.play(); } catch (_err) {}
+    });
+  };
+
+  ppt.clicks = {
+    current: 0,
+    total: 0,
+    _listeners: [],
+    _advanceListeners: [],
+    reset: function () {
+      this.current = 0;
+    },
+    _clearListeners: function () {
+      this._listeners = [];
+      this._advanceListeners = [];
+    },
+    setTotal: function (n) {
+      this.total = Math.max(0, Number(n) || 0);
+      if (this.current > this.total) this.current = this.total;
+    },
+    advance: function () {
+      if (this.total > 0 && this.current >= this.total) return false;
+      this.current += 1;
+      this._dispatch(this.current);
+      return true;
+    },
+    on: function (clickNum, fn) {
+      this._listeners.push({ clickNum: clickNum, fn: fn });
+      if (this.current >= clickNum) {
+        try { fn(); } catch (_err) {}
+      }
+    },
+    onAdvance: function (fn) {
+      this._advanceListeners.push(fn);
+    },
+    _dispatch: function (click) {
+      var self = this;
+      this._listeners.forEach(function (entry) {
+        if (entry.clickNum === click) {
+          try { entry.fn(); } catch (_err) {}
+        }
+      });
+      this._advanceListeners.forEach(function (fn) {
+        try { fn(click, self.current, self.total); } catch (_err) {}
+      });
+    }
+  };
+
+  function isPlaybackBridgeEnabled() {
+    try {
+      var search = new URLSearchParams(global.location && global.location.search || "");
+      return search.get("pptPlayback") === "1";
+    } catch (_err) {
+      return false;
+    }
+  }
+
+  function isEditablePlaybackTarget(target) {
+    if (!target || target.nodeType !== 1) return false;
+    return Boolean(target.closest("input, textarea, select, button, [contenteditable='true'], [contenteditable='']"));
+  }
+
+  function postPlaybackHandled(requestId) {
+    if (!requestId) return;
+    try {
+      if (!global.parent || global.parent === global) return;
+      global.parent.postMessage({
+        type: "ohmyppt:playback:handled",
+        requestId: requestId
+      }, "*");
+    } catch (_err) {}
+  }
+
+  function postPlaybackNavigation(offset, requestId) {
+    try {
+      if (!global.parent || global.parent === global) return;
+      global.parent.postMessage({
+        type: "ohmyppt:playback:goto",
+        offset: offset || 1,
+        requestId: requestId || null
+      }, "*");
+    } catch (_err) {}
+  }
+
+  function consumePlaybackStepOrNavigate(offset, requestId) {
+    if (ppt.clicks && ppt.clicks.total > 0 && typeof ppt.clicks.advance === "function") {
+      if (ppt.clicks.advance()) {
+        postPlaybackHandled(requestId);
+        return true;
+      }
+    }
+    postPlaybackNavigation(offset || 1, requestId);
+    return true;
+  }
+
+  function stopPlaybackEvent(event) {
+    if (!event) return;
+    if (typeof event.preventDefault === "function") event.preventDefault();
+  }
+
+  function installPlaybackBridge() {
+    if (!isPlaybackBridgeEnabled() || global.__ohmypptPlaybackBridgeInstalled) return;
+    var doc = global.document;
+    if (!doc || typeof doc.addEventListener !== "function") return;
+    global.__ohmypptPlaybackBridgeInstalled = true;
+
+    doc.addEventListener("click", function (event) {
+      if (isEditablePlaybackTarget(event.target)) return;
+      stopPlaybackEvent(event);
+      consumePlaybackStepOrNavigate(1);
+    }, true);
+
+    doc.addEventListener("keydown", function (event) {
+      if (isEditablePlaybackTarget(event.target)) return;
+      var forwardKeys = ["ArrowRight", "ArrowDown", "PageDown", " "];
+      var backKeys = ["ArrowLeft", "ArrowUp", "PageUp"];
+      if (forwardKeys.indexOf(event.key) >= 0) {
+        stopPlaybackEvent(event);
+        consumePlaybackStepOrNavigate(1);
+      } else if (backKeys.indexOf(event.key) >= 0) {
+        stopPlaybackEvent(event);
+        postPlaybackNavigation(-1);
+      }
+    }, true);
+
+    global.addEventListener("message", function (event) {
+      if (event.source && event.source !== global.parent) return;
+      var data = event && event.data;
+      if (!data || data.type !== "ohmyppt:playback:advance") return;
+      var offset = Number(data.offset);
+      consumePlaybackStepOrNavigate(
+        Number.isFinite(offset) && offset !== 0 ? offset : 1,
+        data.requestId || null
+      );
+    });
+  }
+
+  installPlaybackBridge();
+
+  var DATA_ANIM_TYPES = {
+    "fade": true,
+    "fade-up": true,
+    "fade-down": true,
+    "fade-left": true,
+    "fade-right": true,
+    "scale-in": true,
+    "slide-up": true,
+    "slide-left": true,
+    "fly-in": true,
+    "wipe": true,
+    "zoom-in": true,
+    "spin-in": true,
+    "grow-shrink": true,
+    "pulse": true,
+    "exit-fade": true,
+    "exit-fly": true,
+    "path": true,
+    "lottie": true
+  };
+
+  var DATA_ANIM_ENTRANCE_TYPES = {
+    "fade": true,
+    "fade-up": true,
+    "fade-down": true,
+    "fade-left": true,
+    "fade-right": true,
+    "scale-in": true,
+    "slide-up": true,
+    "slide-left": true,
+    "fly-in": true,
+    "wipe": true,
+    "zoom-in": true,
+    "spin-in": true
+  };
+
+  var DATA_ANIM_INITIAL_STYLES = {
+    "fade":       { opacity: "0" },
+    "fade-up":    { opacity: "0", transform: "translateY(20px)" },
+    "fade-down":  { opacity: "0", transform: "translateY(-20px)" },
+    "fade-left":  { opacity: "0", transform: "translateX(20px)" },
+    "fade-right": { opacity: "0", transform: "translateX(-20px)" },
+    "scale-in":   { opacity: "0", transform: "scale(0.85)" },
+    "slide-up":   { opacity: "0", transform: "translateY(40px)" },
+    "slide-left": { opacity: "0", transform: "translateX(40px)" },
+    "zoom-in":    { opacity: "0", transform: "scale(0.75)" },
+    "spin-in":    { opacity: "0", transform: "rotate(-12deg) scale(0.92)" }
+  };
+
+  function normalizeDataAnimType(type) {
+    var normalized = String(type || "fade-up").trim().toLowerCase();
+    if (normalized === "none") return "none";
+    if (normalized === "fly" || normalized === "flyin") return "fly-in";
+    if (normalized === "zoom" || normalized === "zoomin") return "zoom-in";
+    if (normalized === "spin" || normalized === "spinin") return "spin-in";
+    if (normalized === "grow" || normalized === "growshrink") return "grow-shrink";
+    if (normalized === "emphasis") return "pulse";
+    if (DATA_ANIM_TYPES[normalized]) return normalized;
+    return "fade-up";
+  }
+
+  function normalizeAnimTrigger(trigger) {
+    var normalized = String(trigger || "load").trim().toLowerCase();
+    if (normalized === "on-click") return "click";
+    if (normalized === "after-previous") return "after";
+    if (normalized === "with-previous") return "with";
+    if (normalized === "click" || normalized === "load" || normalized === "with" || normalized === "after") {
+      return normalized;
+    }
+    return "load";
+  }
+
+  function normalizeAnimSide(side, fallback) {
+    var normalized = String(side || fallback || "bottom").trim().toLowerCase();
+    if (normalized === "up" || normalized === "top") return "top";
+    if (normalized === "down" || normalized === "bottom") return "bottom";
+    if (normalized === "start") return "left";
+    if (normalized === "end") return "right";
+    if (normalized === "left" || normalized === "right" || normalized === "center") return normalized;
+    return fallback || "bottom";
+  }
+
+  function defaultAnimSideForType(type) {
+    switch (type) {
+      case "fade-up":
+      case "slide-up":
+        return "bottom";
+      case "fade-down":
+        return "top";
+      case "fade-left":
+      case "slide-left":
+        return "right";
+      case "fade-right":
+        return "left";
+      default:
+        return "bottom";
+    }
+  }
+
+  function getSideOffset(side, distance) {
+    switch (normalizeAnimSide(side, "bottom")) {
+      case "left":
+        return { x: -distance, y: 0 };
+      case "right":
+        return { x: distance, y: 0 };
+      case "top":
+        return { x: 0, y: -distance };
+      case "center":
+        return { x: 0, y: 0, scale: 0.9 };
+      case "bottom":
+      default:
+        return { x: 0, y: distance };
+    }
+  }
+
+  function getWipeClipPath(side, visible) {
+    if (visible) return "inset(0% 0% 0% 0%)";
+    switch (normalizeAnimSide(side, "left")) {
+      case "right":
+        return "inset(0% 0% 0% 100%)";
+      case "top":
+        return "inset(0% 0% 100% 0%)";
+      case "bottom":
+        return "inset(100% 0% 0% 0%)";
+      case "center":
+        return "inset(20% 20% 20% 20%)";
+      case "left":
+      default:
+        return "inset(0% 100% 0% 0%)";
+    }
+  }
+
+  function getInitialDataAnimStyle(type, from) {
+    if (!DATA_ANIM_ENTRANCE_TYPES[type]) return null;
+    if (type === "fly-in") {
+      var fly = getSideOffset(from, 40);
+      if (fly.scale) return { opacity: "0", transform: "scale(" + fly.scale + ")" };
+      if (fly.x) return { opacity: "0", transform: "translateX(" + fly.x + "px)" };
+      return { opacity: "0", transform: "translateY(" + fly.y + "px)" };
+    }
+    if (type === "wipe") {
+      return { opacity: "0", clipPath: getWipeClipPath(from, false) };
+    }
+    return DATA_ANIM_INITIAL_STYLES[type] || DATA_ANIM_INITIAL_STYLES["fade-up"];
+  }
+
+  function applyInitialHiddenState(el, type, from) {
+    var initial = getInitialDataAnimStyle(type, from);
+    if (!initial) return false;
+    if (initial.opacity !== undefined) el.style.opacity = initial.opacity;
+    if (initial.clipPath) el.style.clipPath = initial.clipPath;
+    // Compose with existing transform so Tailwind classes survive
+    if (initial.transform) {
+      var existing = (el.style.transform || "").trim();
+      el.style.transform = existing ? existing + " " + initial.transform : initial.transform;
+    }
+    return true;
+  }
+
+  function normalizeAnimRepeat(repeat) {
+    var raw = String(repeat || "").trim().toLowerCase();
+    if (!raw || raw === "1" || raw === "false") return null;
+    if (raw === "infinite" || raw === "loop" || raw === "true") return true;
+    var count = Number(raw);
+    if (!Number.isFinite(count) || count <= 1) return null;
+    return Math.min(20, Math.floor(count));
+  }
+
+  function applyRepeatDirectionParams(params, animDef) {
+    if (animDef.repeat === true) {
+      params.loop = true;
+    } else if (Number.isFinite(animDef.repeat) && animDef.repeat > 1) {
+      params.loop = animDef.repeat - 1;
+    }
+
+    if (animDef.direction === "alternate") {
+      params.alternate = true;
+    } else if (animDef.direction === "reverse") {
+      params.reversed = true;
+    }
+  }
+
+  function parseMotionPathDelta(path) {
+    var raw = String(path || "").trim();
+    if (!raw) return null;
+    var coords = raw.match(/-?\d+(?:\.\d+)?/g);
+    if (!coords || coords.length < 4) return null;
+    var startX = Number(coords[0]);
+    var startY = Number(coords[1]);
+    var endX = Number(coords[coords.length - 2]);
+    var endY = Number(coords[coords.length - 1]);
+    if (![startX, startY, endX, endY].every(Number.isFinite)) return null;
+    return { x: endX - startX, y: endY - startY };
+  }
+
+  function scanDataAnimElements(root) {
+    ppt.clicks.reset();
+    ppt.clicks._clearListeners();
+
+    var elements = Array.from((root || document).querySelectorAll("[data-anim]"));
+    if (elements.length === 0) {
+      ppt.clicks.setTotal(0);
+      return null;
+    }
+
+    var animConfigs = [];
+    // Per-trigger-group counters for stagger(N) → numeric delay
+    var staggerCounters = {};
+    var lastSequenceStart = 0;
+    var lastSequenceEnd = 0;
+
+    elements.forEach(function (el, index) {
+      var type = normalizeDataAnimType(el.getAttribute("data-anim") || "fade-up");
+      if (type === "none") return;
+
+      var trigger = normalizeAnimTrigger(el.getAttribute("data-anim-trigger") || "load");
+      var effectiveTrigger = trigger === "click" ? "click" : "load";
+      var from = normalizeAnimSide(el.getAttribute("data-anim-from"), defaultAnimSideForType(type));
+      var duration = Number(el.getAttribute("data-anim-duration")) || 500;
+      var easing = (el.getAttribute("data-anim-easing") || "easeOutCubic").trim();
+      var delayRaw = (el.getAttribute("data-anim-delay") || "0").trim();
+      var delay = 0;
+      var boundedDuration = Math.max(100, Math.min(5000, duration));
+
+      if (delayRaw.indexOf("stagger") === 0) {
+        var match = delayRaw.match(/stagger\s*\(\s*(\d+)\s*\)/);
+        var gap = match ? Number(match[1]) : 50;
+        var groupKey = effectiveTrigger;
+        if (staggerCounters[groupKey] === undefined) staggerCounters[groupKey] = 0;
+        delay = staggerCounters[groupKey] * gap;
+        staggerCounters[groupKey] += 1;
+      } else {
+        delay = Number(delayRaw) || 0;
+      }
+
+      if (effectiveTrigger === "load") {
+        if (trigger === "after") {
+          delay += lastSequenceEnd;
+          lastSequenceStart = delay;
+          lastSequenceEnd = Math.max(lastSequenceEnd, delay + boundedDuration);
+        } else if (trigger === "with") {
+          delay += lastSequenceStart;
+          lastSequenceEnd = Math.max(lastSequenceEnd, delay + boundedDuration);
+        } else {
+          lastSequenceStart = delay;
+          lastSequenceEnd = Math.max(lastSequenceEnd, delay + boundedDuration);
+        }
+      }
+
+      if (trigger === "click" && type !== "lottie") {
+        if (applyInitialHiddenState(el, type, from)) {
+          el.setAttribute("data-ppt-anim-initialized", "1");
+        }
+      }
+
+      var animDef = {
+        targets: el,
+        type: type,
+        trigger: trigger,
+        effectiveTrigger: effectiveTrigger,
+        from: from,
+        duration: boundedDuration,
+        easing: easing,
+        delay: delay,
+        repeat: normalizeAnimRepeat(el.getAttribute("data-anim-repeat")),
+        direction: (el.getAttribute("data-anim-direction") || "normal").trim().toLowerCase(),
+        path: (el.getAttribute("data-anim-path") || "").trim(),
+        order: index
+      };
+
+      // Lottie hook — parse additional attributes, store in config.
+      if (type === "lottie") {
+        animDef.lottieSrc = (el.getAttribute("data-anim-lottie-src") || "").trim();
+        animDef.lottieLoop = el.getAttribute("data-anim-lottie-loop") !== "false";
+        animDef.lottieAutoplay = el.getAttribute("data-anim-lottie-autoplay") !== "false";
+      }
+
+      animConfigs.push(animDef);
+    });
+
+    var loadAnims = animConfigs.filter(function (a) { return a.effectiveTrigger === "load"; });
+    var clickAnims = animConfigs.filter(function (a) { return a.effectiveTrigger === "click"; });
+
+    ppt.clicks.setTotal(clickAnims.length);
+
+    return { load: loadAnims, click: clickAnims, all: animConfigs };
+  }
+
+  function executeDataAnimConfig(config) {
+    if (!config || config.length === 0) return;
+
+    config.forEach(function (animDef) {
+      // Lottie hook — delegate to dedicated player when available.
+      // Falls through to no-op until lottie runtime is injected.
+      if (animDef.type === "lottie") {
+        if (typeof ppt.playLottie === "function") {
+          ppt.playLottie(animDef.targets, animDef);
+        }
+        return;
+      }
+
+      var params = {
+        duration: animDef.duration,
+        easing: animDef.easing,
+        delay: animDef.delay
+      };
+      applyRepeatDirectionParams(params, animDef);
+
+      var motionPathDelta = parseMotionPathDelta(animDef.path);
+
+      switch (animDef.type) {
+        case "fade":
+          params.opacity = [0, 1];
+          break;
+        case "fade-up":
+          params.opacity = [0, 1];
+          params.translateY = [20, 0];
+          break;
+        case "fade-down":
+          params.opacity = [0, 1];
+          params.translateY = [-20, 0];
+          break;
+        case "fade-left":
+          params.opacity = [0, 1];
+          params.translateX = [20, 0];
+          break;
+        case "fade-right":
+          params.opacity = [0, 1];
+          params.translateX = [-20, 0];
+          break;
+        case "scale-in":
+          params.opacity = [0, 1];
+          params.scale = [0.85, 1];
+          break;
+        case "slide-up":
+          params.opacity = [0, 1];
+          params.translateY = [40, 0];
+          break;
+        case "slide-left":
+          params.opacity = [0, 1];
+          params.translateX = [40, 0];
+          break;
+        case "fly-in": {
+          var fly = getSideOffset(animDef.from, 40);
+          params.opacity = [0, 1];
+          if (fly.scale) {
+            params.scale = [fly.scale, 1];
+          } else if (fly.x) {
+            params.translateX = [fly.x, 0];
+          } else {
+            params.translateY = [fly.y, 0];
+          }
+          break;
+        }
+        case "wipe":
+          params.opacity = [0, 1];
+          params.clipPath = [getWipeClipPath(animDef.from, false), getWipeClipPath(animDef.from, true)];
+          break;
+        case "zoom-in":
+          params.opacity = [0, 1];
+          params.scale = [0.75, 1];
+          break;
+        case "spin-in":
+          params.opacity = [0, 1];
+          params.rotate = [-12, 0];
+          params.scale = [0.92, 1];
+          break;
+        case "grow-shrink":
+          params.scale = [0.9, 1.08, 1];
+          break;
+        case "pulse":
+          params.scale = [1, 1.06, 1];
+          break;
+        case "exit-fade":
+          params.opacity = [1, 0];
+          break;
+        case "exit-fly": {
+          var exitFly = getSideOffset(animDef.from, 40);
+          params.opacity = [1, 0];
+          if (exitFly.x) {
+            params.translateX = [0, exitFly.x];
+          } else if (exitFly.y) {
+            params.translateY = [0, exitFly.y];
+          } else {
+            params.scale = [1, 0.9];
+          }
+          break;
+        }
+        default:
+          if (motionPathDelta) {
+            params.translateX = [0, motionPathDelta.x];
+            params.translateY = [0, motionPathDelta.y];
+          } else {
+            params.opacity = [0, 1];
+            params.translateY = [20, 0];
+          }
+      }
+
+      if (motionPathDelta && !params.translateX && !params.translateY) {
+        params.translateX = [0, motionPathDelta.x];
+        params.translateY = [0, motionPathDelta.y];
+      }
+
+      // Unified path: print-mode, task tracking, stopAnimations()
+      ppt.animate(animDef.targets, params);
+    });
+  }
+
+  // no-op until lottie-web injected
+  ppt.playLottie = function (_el, _animDef) {};
+
+  ppt.scanDataAnim = function (root) {
+    return scanDataAnimElements(root);
+  };
+
+  ppt.executeDataAnim = function (config) {
+    return executeDataAnimConfig(config);
   };
 
   ppt.createChart = function (target, config) {
@@ -511,7 +1140,7 @@
     } else if (patch && typeof patch === "object") {
       if (Object.prototype.hasOwnProperty.call(patch, "data")) chart.data = normalizeChartData(patch.data);
       if (Object.prototype.hasOwnProperty.call(patch, "options")) {
-        var patchedConfig = { options: patch.options };
+        var patchedConfig = { data: chart.data, options: patch.options };
         ensureChartNumberFormatters(patchedConfig);
         chart.options = patchedConfig.options;
       }

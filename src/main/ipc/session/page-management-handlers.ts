@@ -1,6 +1,11 @@
 import { ipcMain } from 'electron'
 import type { IpcContext } from '../context'
-import { loadEditableSessionPages, persistManagedPages } from './page-management-service'
+import {
+  createBlankSessionPage,
+  loadEditableSessionPages,
+  persistManagedPages,
+  renameSessionPageTitle
+} from './page-management-service'
 import { ensureHistoryBaselineSafe, recordHistoryOperationStrict } from '../../history/git-history-service'
 
 export function registerPageManagementHandlers(ctx: IpcContext): void {
@@ -96,6 +101,7 @@ export function registerPageManagementHandlers(ctx: IpcContext): void {
         pageNumber: p.pageNumber,
         pageId: p.pageId,
         title: p.title,
+        contentOutline: p.contentOutline?.trim() || null,
         html: '',
         htmlPath: p.htmlPath,
         status: p.status,
@@ -192,12 +198,223 @@ export function registerPageManagementHandlers(ctx: IpcContext): void {
         pageNumber: p.pageNumber,
         pageId: p.pageId,
         title: p.title,
+        contentOutline: p.contentOutline?.trim() || null,
         html: '',
         htmlPath: p.htmlPath,
         status: p.status,
         error: p.error
       })),
       selectedPageId: newSelectedId
+    }
+  })
+
+  ipcMain.handle('session:createBlankPage', async (_event, payload) => {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
+    const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : ''
+    const sourcePageId = typeof record.sourcePageId === 'string' ? record.sourcePageId.trim() : ''
+    if (!sessionId) throw new Error('sessionId 不能为空')
+    if (!sourcePageId) throw new Error('sourcePageId 不能为空')
+    const { projectDir, pages } = await loadEditableSessionPages(ctx, sessionId)
+    await ensureHistoryBaselineSafe(ctx.db, sessionId, projectDir)
+    const sourcePage = pages.find((page) => page.id === sourcePageId || page.pageId === sourcePageId)
+    const result = await createBlankSessionPage(ctx, {
+      sessionId,
+      sourcePageId
+    })
+    const prompt = sourcePage
+      ? `新增空白页到末尾：复制 P${sourcePage.pageNumber}《${sourcePage.title}》`
+      : '新增空白页到末尾'
+    await recordHistoryOperationStrict(ctx.db, {
+      sessionId,
+      type: 'addPage',
+      scope: 'session',
+      projectDir,
+      prompt,
+      metadata: {
+        addPage: true,
+        blankPage: true,
+        sourcePageId,
+        selectedPageId: result.selectedPageId,
+        totalPages: result.pages.length
+      }
+    })
+
+    return {
+      ok: true,
+      generatedPages: result.pages.map((p) => ({
+        id: p.id,
+        pageNumber: p.pageNumber,
+        pageId: p.pageId,
+        title: p.title,
+        contentOutline: p.contentOutline?.trim() || null,
+        html: p.html || '',
+        htmlPath: p.htmlPath,
+        status: p.status,
+        error: p.error
+      })),
+      selectedPageId: result.selectedPageId
+    }
+  })
+
+  ipcMain.handle('session:updatePageTitle', async (_event, payload) => {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
+    const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : ''
+    const pageId = typeof record.pageId === 'string' ? record.pageId.trim() : ''
+    const title = typeof record.title === 'string' ? record.title.replace(/\s+/g, ' ').trim() : ''
+    if (!sessionId) throw new Error('sessionId 不能为空')
+    if (!pageId) throw new Error('pageId 不能为空')
+    if (!title) throw new Error('页面标题不能为空')
+
+    const { projectDir, pages } = await loadEditableSessionPages(ctx, sessionId)
+    const page = pages.find((item) => item.id === pageId || item.pageId === pageId)
+    if (!page) throw new Error('未找到要修改标题的页面')
+    if (page.title === title) {
+      return {
+        ok: true,
+        generatedPages: pages.map((p) => ({
+          id: p.id,
+          pageNumber: p.pageNumber,
+          pageId: p.pageId,
+          title: p.title,
+          contentOutline: p.contentOutline?.trim() || null,
+          html: '',
+          htmlPath: p.htmlPath,
+          status: p.status,
+          error: p.error
+        })),
+        selectedPageId: page.id
+      }
+    }
+
+    await ensureHistoryBaselineSafe(ctx.db, sessionId, projectDir)
+    const result = await renameSessionPageTitle(ctx, {
+      sessionId,
+      pageId,
+      title
+    })
+    const prompt = `修改页面标题：P${page.pageNumber}《${page.title}》->《${title}》`
+    await recordHistoryOperationStrict(ctx.db, {
+      sessionId,
+      type: 'edit',
+      scope: 'page',
+      projectDir,
+      prompt,
+      metadata: {
+        pageId: page.id,
+        pageSlug: page.pageId,
+        oldTitle: page.title,
+        newTitle: title,
+        selectedPageId: result.selectedPageId,
+        titleEdit: true
+      }
+    })
+
+    return {
+      ok: true,
+      generatedPages: result.pages.map((p) => ({
+        id: p.id,
+        pageNumber: p.pageNumber,
+        pageId: p.pageId,
+        title: p.title,
+        contentOutline: p.contentOutline?.trim() || null,
+        html: p.html || '',
+        htmlPath: p.htmlPath,
+        status: p.status,
+        error: p.error
+      })),
+      selectedPageId: result.selectedPageId
+    }
+  })
+
+  ipcMain.handle('session:updatePageOutline', async (_event, payload) => {
+    const record = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
+    const sessionId = typeof record.sessionId === 'string' ? record.sessionId.trim() : ''
+    const pageId = typeof record.pageId === 'string' ? record.pageId.trim() : ''
+    const contentOutline =
+      typeof record.contentOutline === 'string'
+        ? record.contentOutline.replace(/\s+/g, ' ').trim()
+        : ''
+    if (!sessionId) throw new Error('sessionId 不能为空')
+    if (!pageId) throw new Error('pageId 不能为空')
+
+    const { projectDir, pages } = await loadEditableSessionPages(ctx, sessionId)
+    const page = pages.find((item) => item.id === pageId || item.pageId === pageId)
+    if (!page) throw new Error('未找到要修改大纲的页面')
+    const oldOutline = page.contentOutline?.trim() || ''
+    if (oldOutline === contentOutline) {
+      return {
+        ok: true,
+        generatedPages: pages.map((p) => ({
+          id: p.id,
+          pageNumber: p.pageNumber,
+          pageId: p.pageId,
+          title: p.title,
+          contentOutline: p.contentOutline?.trim() || null,
+          html: '',
+          htmlPath: p.htmlPath,
+          status: p.status,
+          error: p.error
+        })),
+        selectedPageId: page.id
+      }
+    }
+
+    await ensureHistoryBaselineSafe(ctx.db, sessionId, projectDir)
+    const snapshots = await ctx.db.listLatestGenerationPageSnapshot(sessionId)
+    const snapshot =
+      snapshots.find((item) => item.page_id === page.pageId) ||
+      (page.legacyPageId
+        ? snapshots.find((item) => item.page_id === page.legacyPageId)
+        : undefined)
+    const latestRun = snapshot ? undefined : await ctx.db.getLatestGenerationRun(sessionId)
+    const runId = snapshot?.run_id || latestRun?.id
+    if (!runId) throw new Error('未找到可更新的大纲记录')
+    await ctx.db.upsertGenerationPage({
+      runId,
+      sessionId,
+      pageId: snapshot?.page_id || page.pageId,
+      pageNumber: snapshot?.page_number || page.pageNumber,
+      title: snapshot?.title || page.title,
+      contentOutline: contentOutline || null,
+      layoutIntent: snapshot?.layout_intent || null,
+      htmlPath: snapshot?.html_path || page.htmlPath,
+      status: snapshot?.status || page.status || 'completed',
+      error: snapshot?.error || null,
+      retryCount: snapshot?.retry_count || 0
+    })
+
+    const refreshed = await loadEditableSessionPages(ctx, sessionId)
+    const prompt = `修改页面大纲：P${page.pageNumber}《${page.title}》`
+    await recordHistoryOperationStrict(ctx.db, {
+      sessionId,
+      type: 'edit',
+      scope: 'page',
+      projectDir,
+      prompt,
+      metadata: {
+        pageId: page.id,
+        pageSlug: page.pageId,
+        oldOutline,
+        newOutline: contentOutline,
+        selectedPageId: page.id,
+        outlineEdit: true
+      }
+    })
+
+    return {
+      ok: true,
+      generatedPages: refreshed.pages.map((p) => ({
+        id: p.id,
+        pageNumber: p.pageNumber,
+        pageId: p.pageId,
+        title: p.title,
+        contentOutline: p.contentOutline?.trim() || null,
+        html: p.html || '',
+        htmlPath: p.htmlPath,
+        status: p.status,
+        error: p.error
+      })),
+      selectedPageId: page.id
     }
   })
 }

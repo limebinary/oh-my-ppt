@@ -19,6 +19,20 @@ export interface ParseDocumentPlanPayload {
   existingBrief?: string
 }
 
+export interface PrepareReferenceDocumentPayload {
+  files: Array<{
+    path: string
+    name?: string
+  }>
+}
+
+export interface ParseImageReferencePayload {
+  file: {
+    path: string
+    name?: string
+  }
+}
+
 export interface ParsedDocumentPlanResult {
   topic: string
   pageCount: number
@@ -29,6 +43,10 @@ export interface ParsedDocumentPlanResult {
     characterCount: number
     path: string
   }>
+}
+
+export interface PreparedReferenceDocumentResult {
+  files: ParsedDocumentPlanResult['files']
 }
 
 export interface PptxImportPayload {
@@ -129,10 +147,20 @@ export interface GeneratedPagePayload {
   id?: string
   pageNumber: number
   title: string
+  contentOutline?: string | null
   html: string
   htmlPath?: string
   pageId?: string
   sourceUrl?: string
+}
+
+export interface PageStatusPayload {
+  id?: string
+  pageNumber: number
+  title: string
+  pageId?: string
+  htmlPath?: string
+  error?: string
 }
 
 export interface GenerateStagePayload {
@@ -178,6 +206,14 @@ export type GenerateChunkEvent =
   | {
       type: 'page_updated'
       payload: GenerateStagePayload & GeneratedPagePayload
+    }
+  | {
+      type: 'page_planned'
+      payload: GenerateStagePayload & PageStatusPayload
+    }
+  | {
+      type: 'page_started' | 'page_failed'
+      payload: GenerateStagePayload & PageStatusPayload
     }
   | {
       type: 'run_completed'

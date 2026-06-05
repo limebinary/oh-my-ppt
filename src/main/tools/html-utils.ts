@@ -5,6 +5,11 @@ import {
   pageContentEndMarker,
   pageContentStartMarker
 } from './types'
+import {
+  CHART_SKILL_NAME,
+  DATA_ANIM_SKILL_NAME,
+  formatSkillUsageRequirement,
+} from '../skills/skill-contract'
 
 // ── HTML parsing ──
 
@@ -87,22 +92,6 @@ export const PAGE_PLACEHOLDER_TEXT = '等待模型填充这一页内容'
 export const isPlaceholderPageHtml = (html: string): boolean =>
   html.includes(PAGE_PLACEHOLDER_TEXT) || /data-placeholder-page\s*=\s*["']1["']/i.test(html)
 
-const classBaseName = (cls: string): string => cls.split(':').pop() || cls
-
-const hasConcreteChartHeightClass = (classRaw: string): boolean =>
-  classRaw
-    .split(/\s+/)
-    .filter(Boolean)
-    .some((cls) => {
-      const base = classBaseName(cls)
-      if (/^h-(?:full|screen|dvh|svh|lvh|auto)$/.test(base)) return false
-      return /^h-(?:\[[^\]]+\]|(?!0\b)\d+)/.test(base)
-    })
-
-const hasConcreteChartHeightStyle = (styleRaw: string): boolean =>
-  /(?:^|;)\s*height\s*:\s*(?!\s*(?:auto|0(?:px|rem|em|%)?|100%|inherit|initial|unset)\b)[^;]+/i.test(
-    styleRaw
-  )
 
 const isAllowedRuntimeAsset = (src: string): boolean => {
   const normalized = src.trim().toLowerCase()
@@ -131,8 +120,12 @@ const isAllowedRuntimeAsset = (src: string): boolean => {
 
 export const validateHtmlContent = (html: string): { valid: boolean; errors: string[] } => {
   const errors: string[] = []
+  const animationCallScanHtml = html.replace(
+    /\bdata-anim-delay\s*=\s*(["'])stagger\s*\(\s*\d+\s*\)\1/gi,
+    'data-anim-delay=$1__DATA_ANIM_STAGGER__$1'
+  )
   const hasUnqualifiedCall = (fnName: string): boolean =>
-    new RegExp(`(^|[^\\w$.])${fnName}\\s*\\(`, 'm').test(html)
+    new RegExp(`(^|[^\\w$.])${fnName}\\s*\\(`, 'm').test(animationCallScanHtml)
   if (!html || html.trim().length === 0) {
     errors.push('HTML 内容为空')
     return { valid: false, errors }
@@ -188,24 +181,34 @@ export const validateHtmlContent = (html: string): { valid: boolean; errors: str
     errors.push(`检测到不允许的 script src：${preview}。页面片段禁止引入脚本资源，运行时已预注入。`)
   }
   if (/anime\s*\(\s*\{[\s\S]{0,240}?targets\s*:/im.test(html)) {
-    errors.push('检测到旧版 anime({ targets, ... }) 写法，请统一改为 PPT.animate(...)（v4）')
+    errors.push(`检测到旧版 anime({ targets, ... }) 写法；修改动画前请先 ${formatSkillUsageRequirement(DATA_ANIM_SKILL_NAME)}`)
   }
   if (/(^|[^\w$])anime\.(?:animate|stagger|createTimeline|timeline)\s*\(/i.test(html)) {
-    errors.push('检测到直接 anime.* 调用，请统一改为 PPT.animate/PPT.stagger/PPT.createTimeline')
+    errors.push(`检测到直接 anime.* 调用；修改动画前请先 ${formatSkillUsageRequirement(DATA_ANIM_SKILL_NAME)}`)
   }
   if (/PPT\.animate\s*\(\s*\{[\s\S]{0,240}?targets\s*:/im.test(html)) {
-    errors.push('检测到 PPT.animate({ targets, ... }) 写法，请改为 PPT.animate(targets, params)')
+    errors.push(`检测到 PPT.animate({ targets, ... }) 写法；修改动画前请先 ${formatSkillUsageRequirement(DATA_ANIM_SKILL_NAME)}`)
   }
   if (
     hasUnqualifiedCall('animate') ||
     hasUnqualifiedCall('stagger') ||
     hasUnqualifiedCall('createTimeline')
   ) {
-    errors.push('检测到未命名空间的动画调用（animate/stagger/createTimeline），请统一改为 PPT.*')
+    errors.push(`检测到未命名空间的动画调用（animate/stagger/createTimeline）；修改动画前请先 ${formatSkillUsageRequirement(DATA_ANIM_SKILL_NAME)}`)
   }
   if (/new\s+Chart\s*\(/i.test(html)) {
     errors.push(
-      '检测到直接 new Chart(...) 调用，请统一改为 PPT.createChart(canvasOrSelector, config)'
+      `检测到直接 new Chart(...) 调用；修改图表前请先 ${formatSkillUsageRequirement(CHART_SKILL_NAME)}`
+    )
+  }
+  if (/addEventListener\s*\(\s*['"](?:ppt-ready|ppt-rendered|ppt-page-ready)['"]/i.test(html)) {
+    errors.push(
+      `检测到自定义事件（ppt-ready/ppt-rendered/ppt-page-ready）绑定 chart 代码，这些事件运行时不会触发。请改用 DOMContentLoaded。${formatSkillUsageRequirement(CHART_SKILL_NAME)}`
+    )
+  }
+  if (/PPT\.createChart/i.test(html) && !/DOMContentLoaded/i.test(html)) {
+    errors.push(
+      `PPT.createChart 未包裹在 DOMContentLoaded 回调中，图表可能无法渲染。${formatSkillUsageRequirement(CHART_SKILL_NAME)}`
     )
   }
   if (/<[^>]*$/.test(html.trim())) {
@@ -335,38 +338,18 @@ export const validatePersistedPageHtml = (
     errors.push(`data-block-id 重复：${duplicatedBlockIds.join(', ')}`)
   }
 
-  $('canvas').each((index, node) => {
-    const canvas = $(node)
-    const parent = canvas.parent()
-    if (!parent.length) {
-      errors.push(`第 ${index + 1} 个 canvas 缺少父容器`)
-      return
-    }
-    const parentElementChildren = parent.children()
-    const parentIsDedicatedFrame =
-      parentElementChildren.length === 1 && parentElementChildren.get(0) === canvas.get(0)
-    const hasDirectHeight =
-      hasConcreteChartHeightClass(parent.attr('class') || '') ||
-      hasConcreteChartHeightStyle(parent.attr('style') || '')
-
-    if (!parentIsDedicatedFrame || !hasDirectHeight) {
-      errors.push(`第 ${index + 1} 个 canvas 必须放在带固定高度的直接父容器中`)
-    }
-  })
 
   $('video').each((index, node) => {
     const video = $(node)
-    const missingAttrs = ['autoplay', 'muted', 'loop', 'playsinline'].filter(
+    const missingAttrs = ['controls', 'playsinline'].filter(
       (attr) => video.attr(attr) === undefined
     )
-    if (video.attr('controls') !== undefined) {
-      errors.push(`第 ${index + 1} 个 video 禁止包含 controls 属性`)
-    }
     if (missingAttrs.length > 0) {
       errors.push(`第 ${index + 1} 个 video 缺少属性：${missingAttrs.join(', ')}`)
     }
-    if ((video.attr('preload') || '').toLowerCase() !== 'auto') {
-      errors.push(`第 ${index + 1} 个 video 必须设置 preload="auto"`)
+    const preload = (video.attr('preload') || '').toLowerCase()
+    if (preload && !['metadata', 'auto', 'none'].includes(preload)) {
+      errors.push(`第 ${index + 1} 个 video 的 preload 只能是 metadata、auto 或 none`)
     }
   })
 

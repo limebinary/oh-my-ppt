@@ -11,6 +11,7 @@ import { resolveActiveModelConfig, resolveGlobalModelTimeouts } from '../config/
 import { buildDesignContractWithLLM } from '../engine/generate'
 import { customAlphabet } from 'nanoid'
 import { recordHistoryOperationStrict } from '../../history/git-history-service'
+import { createDefaultDesignContract } from '../../utils/design-contract'
 
 const nanoidLower = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 12)
 
@@ -20,7 +21,8 @@ type PptxImportPayload = {
   styleId?: unknown
 }
 
-const MAX_PPTX_SIZE = 80 * 1024 * 1024
+const MAX_PPTX_SIZE_MB = 100
+const MAX_PPTX_SIZE = MAX_PPTX_SIZE_MB * 1024 * 1024
 
 const parsePayload = (payload: unknown): { filePath: string; title: string; styleId: string | null } => {
   const record = payload && typeof payload === 'object' ? (payload as PptxImportPayload) : {}
@@ -43,7 +45,7 @@ export function registerPptxImportHandlers(ctx: IpcContext): void {
     }
     const stat = await fs.promises.stat(sourcePath)
     if (stat.size > MAX_PPTX_SIZE) {
-      throw new Error('PPTX 文件不能超过 80MB')
+      throw new Error(`PPTX 文件不能超过 ${MAX_PPTX_SIZE_MB}MB`)
     }
 
     const sessionId = crypto.randomUUID()
@@ -92,6 +94,7 @@ export function registerPptxImportHandlers(ctx: IpcContext): void {
         provider: 'import',
         model: 'pptx-import'
       })
+      await db.updateSessionDesignContract(sessionId, createDefaultDesignContract())
       const projectId = await db.createProject({
         session_id: sessionId,
         title: imported.title,

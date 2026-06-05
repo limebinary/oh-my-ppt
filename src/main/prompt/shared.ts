@@ -1,26 +1,20 @@
 import { loadStyleSkill } from '../utils/style-skills'
 import { formatLayoutIntentPrompt } from '@shared/layout-intent'
 import type { DesignContract, SessionDeckGenerationContext } from '../tools/types'
+import {
+  CHART_SKILL_NAME,
+  DATA_ANIM_SKILL_NAME,
+  LAYOUT_SKILL_NAME,
+  formatSkillUsageRequirement,
+} from '../skills/skill-contract'
 
 export const PAGE_SEMANTIC_STRUCTURE = [
   '## 页面语义结构',
+  `- The layout source of truth is the skill ${LAYOUT_SKILL_NAME}. Before creating a slide, choosing a composition, or repairing overflow/collision: ${formatSkillUsageRequirement(LAYOUT_SKILL_NAME)}`,
+  '- If the task is a tiny text/style edit that does not affect layout, do not read the full layout reference.',
   '- 直接输出完整创意页面片段；系统会自动包裹 section[data-page-scaffold]、main[data-role="content"] 和标准 page frame。',
   '- 如果页面有明确标题，可以给第一个标题元素添加 data-role="title"；没有传统标题时不要为了校验硬造标题。',
-  '- 主动添加 data-block-id 时保持页面内唯一（kebab-case：metric-1、summary、chart-main）；未添加时系统会自动补齐。',
-  '',
-  '布局决策：',
-  '- 先判断本页叙事重心：数据展示、概念解释、信息对比、流程时间线、结论收束、封面/章节页。',
-  '- 标题是阅读路径的一部分，不是固定装饰头部；它应该出现在最能引导阅读的位置。',
-  '- 数据页可以让图表/指标成为主视觉，标题靠边或与关键数字组合。',
-  '- 对比页优先考虑分区结构，标题服务于对比关系。',
-  '- 概念页可以使用中心主视觉、侧栏标题、图文交错或卡片组合。',
-  '- 总结页和封面页可以让标题占据视觉重心。',
-  '- 在同一套视觉语言下保持变化，不要机械重复同一标题位置和同一网格。',
-  '',
-  '标题可读性底线：',
-  '- 竖排仅限 2-6 个中文字符的短标签。',
-  '- 标题包含英文、数字、年份、中英混排或长句时必须横排。',
-  '- 完整标题优先保证可读性，不要为了装饰牺牲阅读。'
+  '- 主动添加 data-block-id 时保持页面内唯一（kebab-case：metric-1、summary、chart-main）；未添加时系统会自动补齐。'
 ].join('\n')
 
 export const CONTENT_LANGUAGE_RULES = [
@@ -48,62 +42,38 @@ export const STABLE_HTML_FRAGMENT_PROTOCOL = [
 
 export const CANVAS_CONSTRAINTS = [
   '## 画布约束',
-  '- 16:9（1600×900），系统自动缩放。可用内容区约 1584×884（外层有 p-2）。',
-  '- 用 Tailwind flex/grid 布局；禁止 w-[1600px]/h-[900px]/100vw/100vh/w-screen/h-screen 等画布锁定。',
-  '- 禁止 vw/vh 字体单位和 text-[clamp(...)]；h1 统一 text-5xl，禁 text-6xl/7xl/8xl。',
-  '- 禁止 iframe。禁止引用系统骨架类。',
-  '- 整套页面复用同一背景体系/主色/字体；背景铺满画布，定义在最外层容器上。',
-  '- 内容过长时精简文字和卡片；不要预留页脚/meta 区。',
-  '- 全局最小字号 16px，禁止 text-xs / text-sm / text-[12px] / text-[14px] 等小于 16px 的字号，正文最小 text-base。'
+  `- Layout details (density, archetype, height budget) are in the skill ${LAYOUT_SKILL_NAME}. ${formatSkillUsageRequirement(LAYOUT_SKILL_NAME)}`,
+  '- 16:9 画布 1600×900，可用区 1584×884。用 Tailwind grid/flex。',
+  '- 最小字号 16px（text-base）。text-xs/text-sm/text-[12px]/text-[13px]/text-[14px]/text-[15px] 一律不用。放不下就减模块。',
+  '- h1 最大 text-5xl（48px）。text-6xl/7xl/8xl、vw/vh、text-[clamp(...)] 不用。',
+  '- 禁止 w-[1600px]/h-[900px]/100vw/100vh/w-screen/h-screen。禁止 iframe。'
+].join('\n')
+
+export const LAYOUT_COLLISION_RULES = [
+  '## 布局防重叠',
+  `- Full collision guide is in the skill ${LAYOUT_SKILL_NAME}. ${formatSkillUsageRequirement(LAYOUT_SKILL_NAME)}`,
+  '- 正文内容用 grid/flex 正常文档流。absolute/fixed 仅用于背景装饰、连接线。正文卡片不得用 absolute/fixed。'
 ].join('\n')
 
 export const FRONTEND_CAPABILITIES = [
-  '## 前端能力（已内置）',
-  '每个 /<pageId>.html 已预注入 ./assets/anime.v4.js、./assets/tailwindcss.v3.js、./assets/chart.v4.js、./assets/ppt-runtime.js 和 KaTeX。',
-  '禁止重复插入上述 script/link 标签；禁止使用任何 CDN 外链。',
+  '## Runtime capability contract',
+  'Available in every /<pageId>.html:',
+  '- Tailwind CSS, anime.js, Chart.js, ppt-runtime.js, and KaTeX are already loaded from local assets.',
+  '- Do not add CDN links, remote scripts, duplicate runtime tags, or iframe content.',
   '',
-  '### 字体',
-  '装饰字体已由系统根据 design contract 自动注入（@font-face + CSS 变量），直接使用：',
-  '- 标题用 var(--ppt-title-font)',
-  '- 正文用 var(--ppt-body-font)',
-  '禁止手写 @font-face 或 <link> 引入外部字体，系统已自动处理。',
-  '所有 CDN 字体/图标库仍然禁止。',
+  'Fonts:',
+  '- Use var(--ppt-title-font) for titles and var(--ppt-body-font) for body text.',
+  '- Do not declare @font-face or import external font/icon libraries.',
   '',
-  '### 图表 — 必须严格按此模板写',
-  '正确写法（高度写在 canvas 的直接父容器上；父容器用固定 h-[...]，不要混用 h-full/flex-1）：',
-  '```html',
-  '<div class=”ppt-chart-frame relative h-[260px] w-full”>',
-  '  <canvas class=”h-full w-full”></canvas>',
-  '</div>',
-  '```',
-  '```js',
-  'const chart = PPT.createChart(canvasEl, { type: “bar”, data: { labels: [“A”,”B”], datasets: [{ data: [10,20] }] }, options: {} });',
-  '```',
-  '⛔ 错误写法（全部会被验证拦截，导致该页生成失败）：',
-  '- new Chart(ctx, config) → 必须用 PPT.createChart(el, config)',
-  '- canvas 上直接写 h-32 / h-full / flex-1 → 高度必须写在父容器',
-  '- canvas 父容器写 h-full / flex-1 / 只有 min-h-* → 父容器必须有明确 h-[...]',
-  '- 把 canvas 直接放进卡片/文本块 → 必须有专属 chart frame 父容器',
+  'Charts:',
+  `- Chart details are in the skill ${CHART_SKILL_NAME}. ${formatSkillUsageRequirement(CHART_SKILL_NAME)}`,
+  '- Wrap in document.addEventListener("DOMContentLoaded", function() { PPT.createChart(...) }). Do not use ppt-ready/ppt-rendered or other custom events.',
   '',
-  '### 动画 — 必须严格按此写法',
-  'PPT.animate 的第一个参数是 targets（CSS 选择器字符串或 DOM 元素），第二个参数是动画参数对象：',
-  '```js',
-  '// ✅ 正确：PPT.animate(selector, params)',
-  'PPT.animate(“.card”, { opacity: [0, 1], translateY: [20, 0], duration: 500, delay: PPT.stagger(100) })',
+  'Animations:',
+  `- Animation rules are in the skill ${DATA_ANIM_SKILL_NAME}. ${formatSkillUsageRequirement(DATA_ANIM_SKILL_NAME)}`,
   '',
-  '// ❌ 错误：把 targets 放在对象里',
-  'PPT.animate({ targets: “.card”, opacity: [0, 1] })  // 会被拦截',
-  'anime({ targets: “.card” })                          // 会被拦截',
-  '```',
-  '创建时间线：PPT.createTimeline(targets, params)',
-  '错峰延迟：PPT.stagger(ms)',
-  '',
-  '### 其他硬校验禁区（违反即失败）',
-  '- 禁止 opacity-0 / invisible / visibility:hidden（初始态必须可见）',
-  '- <style> 中禁止写 opacity:0 / visibility:hidden / display:none（系统会检测并拒绝）',
-  '- 动画初始态写在 PPT.animate 参数里（如 opacity: [0, 1]），不要写在 CSS 或 class 中',
-  '- 数学公式用 \\( \\) 或 $$ $$，不用单 $',
-  '- 动画仅做轻量入场增强（opacity/translate/scale，300-700ms），禁止无限循环'
+  'Validation:',
+  '- Use \\( \\) or $$ $$ for math; do not use single-dollar inline math.'
 ].join('\n')
 
 export const CONTENT_WRITING_RULES = [
